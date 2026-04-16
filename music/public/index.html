@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Remover Pro v5.0 — Ultimate Stem Separation</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="style.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Background Effects -->
+    <canvas id="particlesCanvas"></canvas>
+    <div class="aurora-bg"></div>
+    <div class="grid-overlay"></div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay hidden" id="loadingOverlay">
+        <div class="loading-spinner">
+            <div class="spinner-ring"></div>
+            <div class="spinner-ring"></div>
+            <div class="spinner-ring"></div>
+            <p class="loading-text">ЗАГРУЗКА МОДЕЛЕЙ...</p>
+        </div>
+    </div>
+
+    <!-- Mobile Menu Overlay -->
+    <div class="mobile-menu-overlay hidden" id="mobileMenuOverlay" onclick="toggleMobileMenu()"></div>
+
+    <!-- Main App -->
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-glow"></div>
+            <div class="header-top">
+                <h1 class="app-logo">
+                    <span class="logo-icon">⚛</span>
+                    <span class="logo-text">VOICE REMOVER</span>
+                    <span class="version-badge">v5.0</span>
+                </h1>
+                <button class="mobile-menu-btn hidden" id="mobileMenuBtn" onclick="toggleMobileMenu()" title="Меню">
+                    <i class="bi bi-list"></i>
+                </button>
+            </div>
+            <p class="app-subtitle">ULTIMATE STEMS SEPARATION // LEAD • BACKING • DRUMS • BASS • PIANO • OTHER</p>
+            <div class="header-line"></div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="app-nav" id="appNav">
+            <button class="nav-btn active" data-view="workspace">
+                <i class="bi bi-grid-1x2"></i>
+                <span>СТУДИЯ</span>
+            </button>
+            <button class="nav-btn" data-view="library">
+                <i class="bi bi-music-note-list"></i>
+                <span>БИБЛИОТЕКА</span>
+            </button>
+            <button class="nav-btn" data-view="youtube">
+                <i class="bi bi-youtube"></i>
+                <span>YOUTUBE</span>
+            </button>
+            <button class="nav-btn" data-view="history">
+                <i class="bi bi-clock-history"></i>
+                <span>ИСТОРИЯ</span>
+            </button>
+        </nav>
+
+        <!-- Main Workspace -->
+        <main class="workspace" id="workspaceView">
+            <section class="workspace-overview card">
+                <div class="card-body workspace-overview-body">
+                    <div class="overview-copy">
+                        <span class="overview-eyebrow">STUDIO CONTROL CENTER</span>
+                        <h2>Быстрый старт для разделения, анализа и экспорта трека</h2>
+                        <p>Загрузите локальный файл или вставьте YouTube-ссылку, затем выберите режим и модель. Интерфейс покажет текущий статус сессии и сразу откроет доступные действия.</p>
+                    </div>
+                    <div class="overview-stats" id="overviewStats">
+                        <div class="overview-stat">
+                            <span class="overview-stat-label">Файлы</span>
+                            <strong id="statusFileCount">0</strong>
+                        </div>
+                        <div class="overview-stat">
+                            <span class="overview-stat-label">Режим</span>
+                            <strong id="statusMode">2 STEMS</strong>
+                        </div>
+                        <div class="overview-stat">
+                            <span class="overview-stat-label">Пресет</span>
+                            <strong id="statusPreset">DEFAULT</strong>
+                        </div>
+                        <div class="overview-stat accent">
+                            <span class="overview-stat-label">Статус</span>
+                            <strong id="statusState">Ожидание</strong>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="workspace-grid">
+                <!-- Left Panel: Upload & Settings -->
+                <div class="panel panel-left">
+                    <!-- Upload Section -->
+                    <section class="card upload-card">
+                        <div class="card-header">
+                            <i class="bi bi-cloud-arrow-up-fill"></i>
+                            <h3>ЗАГРУЗКА АУДИО</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="drop-zone" id="dropZone">
+                                <input type="file" id="fileInput" accept="audio/*,video/*,.aac,.aiff,.wma,.opus" multiple hidden>
+                                <div class="drop-zone-content">
+                                    <div class="drop-icon">
+                                        <i class="bi bi-music-note-beamed"></i>
+                                    </div>
+                                    <h4 id="dropText">Перетащите файлы сюда</h4>
+                                    <p>или <span class="highlight">нажмите для выбора</span></p>
+                                    <div class="supported-formats">
+                                        <span class="format-tag">MP3</span>
+                                        <span class="format-tag">WAV</span>
+                                        <span class="format-tag">FLAC</span>
+                                        <span class="format-tag">OGG</span>
+                                        <span class="format-tag">M4A</span>
+                                        <span class="format-tag">AAC</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- File List -->
+                            <div id="fileListSection" class="hidden">
+                                <div class="section-header">
+                                    <h5>Загруженные файлы</h5>
+                                    <button class="btn-icon" onclick="clearFiles()" title="Очистить всё">
+                                        <i class="bi bi-trash3"></i>
+                                    </button>
+                                </div>
+                                <div id="fileList" class="file-list"></div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Mode Selector -->
+                    <section class="card mode-card">
+                        <div class="card-header">
+                            <i class="bi bi-sliders2"></i>
+                            <h3>РЕЖИМ РАЗДЕЛЕНИЯ</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="model-compact-panel" id="modelCompactPanel">
+                                <div class="model-compact-head">
+                                    <div>
+                                        <span class="model-compact-eyebrow">MODEL HUB</span>
+                                        <h4 id="activeModelName">Modern AI Ensemble</h4>
+                                    </div>
+                                    <span class="model-compact-badge" id="activeModelBadge">Recommended</span>
+                                </div>
+                                <p class="model-compact-description" id="activeModelDescription">Balanced modern stack routed through the most stable backend.</p>
+                                <div class="model-compact-meta">
+                                    <span class="model-meta-chip" id="activeModelFamily">Hybrid</span>
+                                    <span class="model-meta-chip" id="activeModelBackend">demucs</span>
+                                    <span class="model-meta-chip" id="activeModelState">ready</span>
+                                </div>
+                            </div>
+
+                            <div class="mode-options">
+                                <div class="mode-option active" data-mode="2stem" onclick="setMode('2stem')">
+                                    <div class="mode-icon"><i class="bi bi-mic"></i></div>
+                                    <div class="mode-info">
+                                        <h5>2 STEMS</h5>
+                                        <p>Вокал + Инструментал</p>
+                                    </div>
+                                    <div class="mode-badge">FAST</div>
+                                </div>
+                                <div class="mode-option" data-mode="4stem" onclick="setMode('4stem')">
+                                    <div class="mode-icon"><i class="bi bi-grid-3x3-gap-fill"></i></div>
+                                    <div class="mode-info">
+                                        <h5>4 STEMS</h5>
+                                        <p>Вокал, Драмсы, Бас, Другое</p>
+                                    </div>
+                                    <div class="mode-badge">HD</div>
+                                </div>
+                                <div class="mode-option" data-mode="6stem" onclick="setMode('6stem')">
+                                    <div class="mode-icon"><i class="bi bi-diagram-3-fill"></i></div>
+                                    <div class="mode-info">
+                                        <h5>6 STEMS</h5>
+                                        <p>Lead, Backing, Драмсы, Бас, Пиано, Другое</p>
+                                    </div>
+                                    <div class="mode-badge premium">ULTRA</div>
+                                </div>
+                            </div>
+
+                            <!-- Quality Settings -->
+                            <div class="settings-panel">
+                                <div class="setting-group">
+                                    <label class="setting-label">
+                                        <i class="bi bi-cpu"></i>
+                                        МОДЕЛЬ РАЗДЕЛЕНИЯ
+                                    </label>
+                                    <select class="model-select" id="modelSelect" onchange="setModel(this.value)">
+                                        <option value="modern_ensemble" selected>Loading models...</option>
+                                    </select>
+                                </div>
+
+                                <div class="setting-group compare-group">
+                                    <label class="setting-label">
+                                        <i class="bi bi-bezier2"></i>
+                                        A/B СРАВНЕНИЕ МОДЕЛЕЙ
+                                    </label>
+                                    <div class="compare-inline-grid">
+                                        <select class="model-select compact" id="compareModelA"></select>
+                                        <select class="model-select compact" id="compareModelB"></select>
+                                    </div>
+                                    <button class="secondary-action-btn" id="compareBtn" onclick="compareModels()">
+                                        <i class="bi bi-shuffle"></i>
+                                        <span>СРАВНИТЬ A / B</span>
+                                    </button>
+                                </div>
+
+                                <div class="setting-group">
+                                    <label class="setting-label">
+                                        <i class="bi bi-palette"></i>
+                                        ПРЕСЕТ ЖАНРА
+                                    </label>
+                                    <div class="preset-scroll" id="presetGrid">
+                                        <button class="preset-btn active" data-preset="default">
+                                            <span class="preset-emoji">🎵</span>
+                                            <span>Default</span>
+                                        </button>
+                                        <button class="preset-btn" data-preset="pop">
+                                            <span class="preset-emoji">🎤</span>
+                                            <span>Pop</span>
+                                        </button>
+                                        <button class="preset-btn" data-preset="rock">
+                                            <span class="preset-emoji">🎸</span>
+                                            <span>Rock</span>
+                                        </button>
+                                        <button class="preset-btn" data-preset="rap">
+                                            <span class="preset-emoji">🎧</span>
+                                            <span>Rap</span>
+                                        </button>
+                                        <button class="preset-btn" data-preset="jazz">
+                                            <span class="preset-emoji">🎷</span>
+                                            <span>Jazz</span>
+                                        </button>
+                                        <button class="preset-btn" data-preset="classic">
+                                            <span class="preset-emoji">🎻</span>
+                                            <span>Classic</span>
+                                        </button>
+                                        <button class="preset-btn" data-preset="electronic">
+                                            <span class="preset-emoji">🎹</span>
+                                            <span>Electronic</span>
+                                        </button>
+                                        <button class="preset-btn" data-preset="acoustic">
+                                            <span class="preset-emoji">🪕</span>
+                                            <span>Acoustic</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="setting-group">
+                                    <label class="setting-label">
+                                        <i class="bi bi-speedometer2"></i>
+                                        СИЛА РАЗДЕЛЕНИЯ
+                                        <span class="value-display" id="strengthValue">100%</span>
+                                    </label>
+                                    <input type="range" class="range-slider" id="vocalStrength" min="0" max="200" value="100"
+                                           oninput="document.getElementById('strengthValue').textContent = this.value + '%'">
+                                    <div class="range-labels">
+                                        <span>Мягче</span>
+                                        <span>Агрессивнее</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Process Button -->
+                            <div style="display:flex; gap:10px; margin-bottom:0">
+                                <button class="process-btn" id="processBtn" onclick="processCurrent()" style="flex:1">
+                                    <i class="bi bi-play-fill"></i>
+                                    <span id="processBtnText">ЗАПУСТИТЬ РАЗДЕЛЕНИЕ</span>
+                                    <div class="process-btn-glow"></div>
+                                </button>
+                                <button class="process-btn" id="processBatchBtn" onclick="processAllFiles()" style="flex:1; background:linear-gradient(135deg, #4ecdc4 0%, #44a8b3 100%); box-shadow:0 0 30px rgba(78, 205, 196, 0.4)" title="Обработать все файлы параллельно">
+                                    <i class="bi bi-arrow-repeat"></i>
+                                    <span>БАТЧ</span>
+                                    <div class="process-btn-glow"></div>
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- Center Panel: Preview & Results -->
+                <div class="panel panel-center">
+                    <section class="card hero-state-card" id="heroStateCard">
+                        <div class="card-body hero-state-body">
+                            <div class="hero-state-badge">
+                                <i class="bi bi-stars"></i>
+                                <span>READY SESSION</span>
+                            </div>
+                            <h3>Подготовьте исходник и начните обработку в пару кликов</h3>
+                            <p id="heroStateText">Сейчас в сессии нет активного файла. Перетащите трек в левую панель или откройте YouTube-вкладку для импорта аудио.</p>
+                            <div class="hero-state-actions">
+                                <button class="hero-action-btn primary" onclick="document.getElementById('fileInput').click()">
+                                    <i class="bi bi-folder2-open"></i>
+                                    <span>Выбрать файл</span>
+                                </button>
+                                <button class="hero-action-btn" onclick="document.querySelector('[data-view=\'youtube\']').click()">
+                                    <i class="bi bi-youtube"></i>
+                                    <span>Открыть YouTube</span>
+                                </button>
+                            </div>
+                            <div class="hero-checklist">
+                                <div class="hero-check-item"><i class="bi bi-check2-circle"></i><span>Drag and drop загрузка</span></div>
+                                <div class="hero-check-item"><i class="bi bi-check2-circle"></i><span>Пресеты под жанры</span></div>
+                                <div class="hero-check-item"><i class="bi bi-check2-circle"></i><span>Экспорт отдельных stems</span></div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Audio Preview -->
+                    <section class="card preview-card hidden" id="audioPreview">
+                        <div class="card-header">
+                            <i class="bi bi-soundwave"></i>
+                            <h3 id="previewName">Оригинал</h3>
+                            <div id="previewBadges"></div>
+                        </div>
+                        <div class="card-body">
+                            <div class="waveform-container">
+                                <canvas id="waveformCanvas" class="waveform-canvas"></canvas>
+                                <div class="waveform-timecodes">
+                                    <span id="currentTime">0:00</span>
+                                    <span id="totalTime">0:00</span>
+                                </div>
+                            </div>
+                            <div class="audio-controls">
+                                <button class="ctrl-btn" id="playBtn" onclick="togglePlayPause()">
+                                    <i class="bi bi-play-fill"></i>
+                                </button>
+                                <button class="ctrl-btn" onclick="skipAudio(-5)">
+                                    <i class="bi bi-skip-backward-fill"></i>
+                                </button>
+                                <button class="ctrl-btn" onclick="skipAudio(5)">
+                                    <i class="bi bi-skip-forward-fill"></i>
+                                </button>
+                                <div class="volume-control">
+                                    <i class="bi bi-volume-up-fill"></i>
+                                    <input type="range" class="volume-slider" id="masterVolume" min="0" max="100" value="100">
+                                </div>
+                            </div>
+                            <audio id="previewAudio" class="hidden"></audio>
+                        </div>
+                    </section>
+
+                    <!-- Analysis Results -->
+                    <section class="card analysis-card hidden" id="analysisResult">
+                        <div class="card-header">
+                            <i class="bi bi-graph-up-arrow"></i>
+                            <h3>АНАЛИЗ ТРЕКА</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="analysis-grid" id="analysisGrid"></div>
+                            <div class="energy-bars" id="spectralBars"></div>
+                        </div>
+                    </section>
+
+                    <!-- Progress -->
+                    <section class="card progress-card hidden" id="progressContainer">
+                        <div class="card-body">
+                            <div class="progress-animation">
+                                <div class="pulse-ring"></div>
+                                <div class="pulse-ring"></div>
+                                <div class="pulse-ring"></div>
+                                <i class="bi bi-cpu"></i>
+                            </div>
+                            <div class="progress-info">
+                                <div class="ah-progress">
+                                    <div class="ah-progress-bar" id="progressBar" style="width: 0%"></div>
+                                </div>
+                                <p class="progress-text" id="progressText">Подготовка...</p>
+                                <p class="progress-eta" id="progressEta"></p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 2-Stem Results -->
+                    <section class="card results-card hidden" id="resultContainer2">
+                        <div class="card-header">
+                            <i class="bi bi-check-circle-fill"></i>
+                            <h3>РАЗДЕЛЕНИЕ ЗАВЕРШЕНО</h3>
+                            <div class="result-actions">
+                                <button class="btn-export" onclick="exportAll()">
+                                    <i class="bi bi-download"></i>
+                                    <span>ЭКСПОРТ ВСЕХ</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="result-summary-strip">
+                                <div class="result-summary-copy">
+                                    <span class="result-summary-eyebrow">OUTPUT SNAPSHOT</span>
+                                    <h4>Файл разделен и готов к предпрослушке, миксу и экспорту</h4>
+                                    <p>Используйте баланс между вокалом и инструменталом, затем экспортируйте финальные дорожки в один клик.</p>
+                                    <div class="backend-trace" id="resultBackendTrace">backend: waiting</div>
+                                </div>
+                                <div class="result-summary-metrics">
+                                    <div class="result-summary-metric">
+                                        <span>Режим</span>
+                                        <strong id="resultSummary2Mode">2 STEMS</strong>
+                                    </div>
+                                    <div class="result-summary-metric">
+                                        <span>Пресет</span>
+                                        <strong id="resultSummary2Preset">DEFAULT</strong>
+                                    </div>
+                                    <div class="result-summary-metric">
+                                        <span>Каналы</span>
+                                        <strong id="resultSummary2Count">2</strong>
+                                    </div>
+                                    <div class="result-summary-metric accent">
+                                        <span>Статус</span>
+                                        <strong id="resultSummary2Status">Готово</strong>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="stems-2col">
+                                <!-- Vocals -->
+                                <div class="stem-card" data-stem="vocals">
+                                    <div class="stem-visual">
+                                        <div class="stem-glow vocals-glow"></div>
+                                        <div class="stem-icon vocals-icon"><i class="bi bi-mic-fill"></i></div>
+                                    </div>
+                                    <div class="stem-content">
+                                        <div class="stem-header">
+                                            <div>
+                                                <h4>ВОКАЛ</h4>
+                                                <p class="stem-desc">Основной вокал</p>
+                                            </div>
+                                            <span class="stem-badge vocals-badge">SEPARATED</span>
+                                        </div>
+                                        <div class="stem-status-row">
+                                            <span class="stem-status-pill vocals-pill"><i class="bi bi-waveform"></i> Solo-ready</span>
+                                            <span class="stem-status-note">Чистый вокальный stem для обработки и экспорта</span>
+                                        </div>
+                                        <audio id="vocalsAudio" controls class="stem-audio"></audio>
+                                        <div class="stem-controls">
+                                            <div class="stem-mixer">
+                                                <div class="mixer-row">
+                                                    <i class="bi bi-volume-up"></i>
+                                                    <input type="range" class="stem-slider" id="vocalsVol" min="0" max="100" value="100" oninput="updateMixer()">
+                                                </div>
+                                                <div class="mixer-row">
+                                                    <i class="bi bi-arrows-angle-expand"></i>
+                                                    <input type="range" class="stem-slider pan-slider" id="vocalsPan" min="-100" max="100" value="0" oninput="updateMixer()">
+                                                    <span class="pan-label">C</span>
+                                                </div>
+                                            </div>
+                                            <div class="stem-actions">
+                                                <button class="stem-btn" onclick="toggleEQ('vocals')" title="Эквалайзер">
+                                                    <i class="bi bi-sliders"></i>
+                                                </button>
+                                                <button class="stem-btn" onclick="toggleEffects('vocals')" title="Эффекты">
+                                                    <i class="bi bi-magic"></i>
+                                                </button>
+                                                <button class="stem-btn export" onclick="exportAudio('vocals')">
+                                                    <i class="bi bi-download"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <!-- EQ Panel -->
+                                        <div class="eq-panel hidden" id="eq-vocals">
+                                            <div class="eq-header">
+                                                <h5>ЭКВАЛАЙЗЕР — ВОКАЛ</h5>
+                                                <button class="btn-close-eq" onclick="toggleEQ('vocals')"><i class="bi bi-x-lg"></i></button>
+                                            </div>
+                                            <div class="eq-sliders" id="eqSliders-vocals"></div>
+                                            <button class="eq-apply-btn" onclick="applyEQ('vocals')">ПРИМЕНИТЬ</button>
+                                        </div>
+                                        <!-- Effects Panel -->
+                                        <div class="fx-panel hidden" id="fx-vocals">
+                                            <div class="fx-header">
+                                                <h5>ЭФФЕКТЫ — ВОКАЛ</h5>
+                                                <button class="btn-close-fx" onclick="toggleEffects('vocals')"><i class="bi bi-x-lg"></i></button>
+                                            </div>
+                                            <div class="fx-options">
+                                                <button class="fx-option" onclick="applyEffect('vocals','reverb')"><i class="bi bi-soundwave"></i> Реверберация</button>
+                                                <button class="fx-option" onclick="applyEffect('vocals','compressor')"><i class="bi bi-compress"></i> Компрессор</button>
+                                                <button class="fx-option" onclick="applyEffect('vocals','chorus')"><i class="bi bi-people"></i> Хорус</button>
+                                                <button class="fx-option" onclick="applyEffect('vocals','pitchshift')"><i class="bi bi-arrow-up-down"></i> Питч</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Instrumental -->
+                                <div class="stem-card" data-stem="instrumental">
+                                    <div class="stem-visual">
+                                        <div class="stem-glow instr-glow"></div>
+                                        <div class="stem-icon instr-icon"><i class="bi bi-music-note-list"></i></div>
+                                    </div>
+                                    <div class="stem-content">
+                                        <div class="stem-header">
+                                            <div>
+                                                <h4>ИНСТРУМЕНТАЛ</h4>
+                                                <p class="stem-desc">Без вокала</p>
+                                            </div>
+                                            <span class="stem-badge instr-badge">NO VOCAL</span>
+                                        </div>
+                                        <div class="stem-status-row">
+                                            <span class="stem-status-pill instr-pill"><i class="bi bi-speaker"></i> Mix-ready</span>
+                                            <span class="stem-status-note">Инструментальная дорожка для ремиксов и караоке</span>
+                                        </div>
+                                        <audio id="instrAudio" controls class="stem-audio"></audio>
+                                        <div class="stem-controls">
+                                            <div class="stem-mixer">
+                                                <div class="mixer-row">
+                                                    <i class="bi bi-volume-up"></i>
+                                                    <input type="range" class="stem-slider" id="instrVol" min="0" max="100" value="100" oninput="updateMixer()">
+                                                </div>
+                                                <div class="mixer-row">
+                                                    <i class="bi bi-arrows-angle-expand"></i>
+                                                    <input type="range" class="stem-slider pan-slider" id="instrPan" min="-100" max="100" value="0" oninput="updateMixer()">
+                                                    <span class="pan-label">C</span>
+                                                </div>
+                                            </div>
+                                            <div class="stem-actions">
+                                                <button class="stem-btn" onclick="toggleEQ('instrumental')" title="Эквалайзер">
+                                                    <i class="bi bi-sliders"></i>
+                                                </button>
+                                                <button class="stem-btn" onclick="toggleEffects('instrumental')" title="Эффекты">
+                                                    <i class="bi bi-magic"></i>
+                                                </button>
+                                                <button class="stem-btn export" onclick="exportAudio('instrumental')">
+                                                    <i class="bi bi-download"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="eq-panel hidden" id="eq-instrumental">
+                                            <div class="eq-header">
+                                                <h5>ЭКВАЛАЙЗЕР — ИНСТРУМЕНТАЛ</h5>
+                                                <button class="btn-close-eq" onclick="toggleEQ('instrumental')"><i class="bi bi-x-lg"></i></button>
+                                            </div>
+                                            <div class="eq-sliders" id="eqSliders-instrumental"></div>
+                                            <button class="eq-apply-btn" onclick="applyEQ('instrumental')">ПРИМЕНИТЬ</button>
+                                        </div>
+                                        <div class="fx-panel hidden" id="fx-instrumental">
+                                            <div class="fx-header">
+                                                <h5>ЭФФЕКТЫ — ИНСТРУМЕНТАЛ</h5>
+                                                <button class="btn-close-fx" onclick="toggleEffects('instrumental')"><i class="bi bi-x-lg"></i></button>
+                                            </div>
+                                            <div class="fx-options">
+                                                <button class="fx-option" onclick="applyEffect('instrumental','reverb')"><i class="bi bi-soundwave"></i> Реверберация</button>
+                                                <button class="fx-option" onclick="applyEffect('instrumental','compressor')"><i class="bi bi-compress"></i> Компрессор</button>
+                                                <button class="fx-option" onclick="applyEffect('instrumental','chorus')"><i class="bi bi-people"></i> Хорус</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Master Mixer -->
+                            <div class="master-mixer">
+                                <div class="mixer-header">
+                                    <i class="bi bi-sliders2"></i>
+                                    <h5>МАСТЕР МИКШЕР</h5>
+                                    <span class="mixer-chip">LIVE BLEND</span>
+                                </div>
+                                <p class="mixer-caption">Смещайте баланс между инструменталом и вокалом, чтобы быстро собрать нужную версию трека.</p>
+                                <div class="balance-control">
+                                    <div class="balance-labels">
+                                        <span><i class="bi bi-music-note-list"></i> ИНСТР</span>
+                                        <span id="balanceLabel">50 / 50</span>
+                                        <span>ВОКАЛ <i class="bi bi-mic"></i></span>
+                                    </div>
+                                    <input type="range" class="balance-slider" id="balanceSlider" min="0" max="100" value="50" oninput="updateBalance()">
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="card compare-card hidden" id="compareContainer">
+                        <div class="card-header">
+                            <i class="bi bi-bezier2"></i>
+                            <h3>A/B СРАВНЕНИЕ МОДЕЛЕЙ</h3>
+                        </div>
+                        <div class="card-body compare-card-body">
+                            <div class="compare-columns">
+                                <div class="compare-column" id="compareColumnA">
+                                    <div class="compare-column-head">
+                                        <div>
+                                            <span class="result-summary-eyebrow">MODEL A</span>
+                                            <h4 id="compareModelATitle">Model A</h4>
+                                        </div>
+                                        <span class="model-meta-chip" id="compareModelABackend">backend</span>
+                                    </div>
+                                    <audio id="compareVocalsA" controls class="stem-audio"></audio>
+                                    <audio id="compareInstrumentalA" controls class="stem-audio mt-2"></audio>
+                                </div>
+                                <div class="compare-column" id="compareColumnB">
+                                    <div class="compare-column-head">
+                                        <div>
+                                            <span class="result-summary-eyebrow">MODEL B</span>
+                                            <h4 id="compareModelBTitle">Model B</h4>
+                                        </div>
+                                        <span class="model-meta-chip" id="compareModelBBackend">backend</span>
+                                    </div>
+                                    <audio id="compareVocalsB" controls class="stem-audio"></audio>
+                                    <audio id="compareInstrumentalB" controls class="stem-audio mt-2"></audio>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 4/6-Stem Results -->
+                    <section class="card results-multi hidden" id="resultContainerMulti">
+                        <div class="card-header">
+                            <i class="bi bi-check-circle-fill"></i>
+                            <h3 id="multiResultTitle">МНОГОКАНАЛЬНОЕ РАЗДЕЛЕНИЕ</h3>
+                            <div class="result-actions">
+                                <button class="btn-export" onclick="exportAll()">
+                                    <i class="bi bi-download"></i>
+                                    <span>ЭКСПОРТ ВСЕХ</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="result-summary-strip multi">
+                                <div class="result-summary-copy">
+                                    <span class="result-summary-eyebrow">MULTI STEM SESSION</span>
+                                    <h4>Каждый stem вынесен в отдельный канал для точного управления миксом</h4>
+                                    <p>Ниже доступны отдельные дорожки, их уровни и быстрый экспорт для дальнейшей аранжировки или мастеринга.</p>
+                                </div>
+                                <div class="result-summary-metrics">
+                                    <div class="result-summary-metric">
+                                        <span>Режим</span>
+                                        <strong id="resultSummaryMultiMode">4 STEMS</strong>
+                                    </div>
+                                    <div class="result-summary-metric">
+                                        <span>Пресет</span>
+                                        <strong id="resultSummaryMultiPreset">DEFAULT</strong>
+                                    </div>
+                                    <div class="result-summary-metric">
+                                        <span>Каналы</span>
+                                        <strong id="resultSummaryMultiCount">0</strong>
+                                    </div>
+                                    <div class="result-summary-metric accent">
+                                        <span>Статус</span>
+                                        <strong id="resultSummaryMultiStatus">Готово</strong>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="stems-grid" id="stemsContainer"></div>
+
+                            <!-- Multi-Stem Mixer -->
+                            <div class="multi-mixer">
+                                <div class="mixer-header">
+                                    <i class="bi bi-soundwave"></i>
+                                    <h5>МИКШЕР СТЕМОВ</h5>
+                                    <span class="mixer-chip">CHANNEL CONTROL</span>
+                                </div>
+                                <p class="mixer-caption">Управляйте громкостью каждого stem-канала независимо и синхронизируйте уровни с карточками выше.</p>
+                                <div id="mixerControls" class="mixer-channels"></div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Reset Button -->
+                    <div class="text-center mt-3 hidden" id="resetSection">
+                        <button class="reset-btn" onclick="resetApp()">
+                            <i class="bi bi-arrow-clockwise"></i>
+                            <span>НОВЫЙ ФАЙЛ</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Library View -->
+        <div class="view hidden" id="libraryView">
+            <div class="view-shell compact-shell">
+                <section class="view-intro card compact-intro-card">
+                    <div class="card-body compact-intro-body">
+                        <div>
+                            <span class="overview-eyebrow">TRACK LIBRARY</span>
+                            <h2>Загруженные исходники в одном компактном списке</h2>
+                            <p>Откройте любой трек из локальной библиотеки и мгновенно вернитесь в рабочую сессию без лишней навигации.</p>
+                        </div>
+                        <div class="compact-intro-stats">
+                            <div class="overview-stat"><span class="overview-stat-label">Треков</span><strong id="libraryTrackCount">0</strong></div>
+                            <div class="overview-stat accent"><span class="overview-stat-label">Сессия</span><strong>READY</strong></div>
+                        </div>
+                    </div>
+                </section>
+
+            <div class="card library-card compact-card">
+                <div class="card-header">
+                    <i class="bi bi-music-note-list"></i>
+                    <h3>БИБЛИОТЕКА ТРЕКОВ</h3>
+                </div>
+                <div class="card-body">
+                    <div id="libraryList" class="library-list">
+                        <div class="empty-state">
+                            <i class="bi bi-inbox"></i>
+                            <p>Библиотека пуста</p>
+                            <span>Загрузите треки для начала работы</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            </div>
+        </div>
+
+        <!-- YouTube View -->
+        <div class="view hidden" id="youtubeView">
+            <div class="view-shell compact-shell">
+            <section class="view-intro card compact-intro-card youtube-intro-card">
+                <div class="card-body compact-intro-body">
+                    <div>
+                        <span class="overview-eyebrow">YOUTUBE IMPORT</span>
+                        <h2>Быстрый импорт трека по ссылке без перехода между экранами</h2>
+                        <p>Вставьте ссылку, дождитесь импорта и сразу отправьте аудио в текущую модель без ручной подготовки файлов.</p>
+                    </div>
+                    <div class="compact-intro-stats">
+                        <div class="overview-stat"><span class="overview-stat-label">Источник</span><strong>YOUTUBE</strong></div>
+                        <div class="overview-stat accent"><span class="overview-stat-label">Формат</span><strong>WAV 44.1</strong></div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="card youtube-card compact-card">
+                <div class="card-header">
+                    <i class="bi bi-youtube"></i>
+                    <h3>ЗАГРУЗКА С YOUTUBE</h3>
+                </div>
+                <div class="card-body">
+                    <div class="youtube-input-group">
+                        <div class="input-wrapper">
+                            <i class="bi bi-link-45deg input-icon"></i>
+                            <input type="text" id="youtubeUrl" placeholder="Вставьте ссылку на YouTube видео...">
+                        </div>
+                        <button class="youtube-btn" onclick="downloadYouTube()">
+                            <i class="bi bi-download"></i>
+                            <span>СКАЧАТЬ</span>
+                        </button>
+                    </div>
+                    <div class="youtube-info">
+                        <i class="bi bi-info-circle-fill"></i>
+                        <p>Аудио будет скачано в максимальном качестве (WAV, 44100Hz)</p>
+                    </div>
+                    <div class="youtube-examples">
+                        <span class="example-label">Примеры ссылок:</span>
+                        <button class="example-btn" onclick="setYouTubeExample('https://www.youtube.com/watch?v=dQw4w9WgXcQ')">
+                            <i class="bi bi-play-btn-fill"></i> Rick Astley
+                        </button>
+                    </div>
+                </div>
+            </div>
+            </div>
+        </div>
+
+        <!-- History View -->
+        <div class="view hidden" id="historyView">
+            <div class="view-shell compact-shell">
+            <section class="view-intro card compact-intro-card history-intro-card">
+                <div class="card-body compact-intro-body">
+                    <div>
+                        <span class="overview-eyebrow">SESSION HISTORY</span>
+                        <h2>Повторное открытие обработок без перегруженного интерфейса</h2>
+                        <p>История показывает компактный журнал задач, чтобы быстро восстановить прошлую сессию и продолжить работу.</p>
+                    </div>
+                    <div class="compact-intro-stats">
+                        <div class="overview-stat"><span class="overview-stat-label">Записей</span><strong id="historyTrackCount">0</strong></div>
+                        <div class="overview-stat accent"><span class="overview-stat-label">Режим</span><strong>ARCHIVE</strong></div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="card history-card compact-card">
+                <div class="card-header">
+                    <i class="bi bi-clock-history"></i>
+                    <h3>ИСТОРИЯ ОБРАБОТОК</h3>
+                    <button class="btn-danger" onclick="clearHistory()">
+                        <i class="bi bi-trash3"></i>
+                        <span>ОЧИСТИТЬ</span>
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div id="historyList" class="history-list">
+                        <div class="empty-state">
+                            <i class="bi bi-clock"></i>
+                            <p>История пуста</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <div class="footer-content">
+                <div class="footer-left">
+                    <span class="footer-logo">⚛</span>
+                    <span>VOICE REMOVER PRO v5.0</span>
+                </div>
+                <div class="footer-center">
+                    <span class="kbd-hint">
+                        <kbd>Space</kbd> Play/Pause
+                        <kbd>S</kbd> Start
+                        <kbd>R</kbd> Reset
+                        <kbd>Ctrl+O</kbd> Open
+                    </span>
+                </div>
+                <div class="footer-right">
+                    <span>2026 // ML ENHANCED</span>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="particles.js"></script>
+    <script src="ws-progress.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

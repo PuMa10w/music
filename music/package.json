@@ -1,0 +1,24 @@
+{
+  "name": "voice-remover",
+  "version": "1.0.0",
+  "description": "Voice remover from songs with YouTube download",
+  "main": "server.js",
+  "scripts": {
+    "start": "cross-env PYTHON_PATH=C:\\Users\\rousl\\AppData\\Local\\Programs\\Python\\Python312\\python.exe node server.js",
+    "dev": "cross-env PYTHON_PATH=C:\\Users\\rousl\\AppData\\Local\\Programs\\Python\\Python312\\python.exe node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "ffmpeg-static": "^5.3.0",
+    "ffprobe-static": "^3.1.0",
+    "fluent-ffmpeg": "^2.1.2",
+    "multer": "^1.4.5-lts.1",
+    "socket.io": "^4.8.3",
+    "uuid": "^9.0.0",
+    "yt-dlp-wrap": "^2.3.12"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0"
+  }
+}
