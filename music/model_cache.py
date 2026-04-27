@@ -28,6 +28,7 @@ class DemucsModelAdapter:
 
     def __init__(self, model_name='htdemucs_ft', device='cpu'):
         from demucs.pretrained import get_model
+        from demucs.apply import apply_model
 
         self.name = model_name
         self.device = device

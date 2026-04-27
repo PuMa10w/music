@@ -213,17 +213,57 @@ function resolveLocalBinary(staticPath, fallbackName) {
     return fallbackName;
 }
 
-// FFmpeg: ffmpeg-static с fallback на системный
-let FFMPEG_PATH = resolveLocalBinary(ffmpegPath, 'ffmpeg');
-if (FFMPEG_PATH === 'ffmpeg') {
-    console.log('[WARN] ffmpeg-static not found, using system ffmpeg');
+// FFmpeg: ищем системный ffmpeg
+let FFMPEG_PATH = null;
+const possiblePaths = isWin ? [
+    path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Packages', 'Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe', 'ffmpeg-8.1-full_build', 'bin', 'ffmpeg.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'ffmpeg', 'bin', 'ffmpeg.exe'),
+    'C:\\ffmpeg\\bin\\ffmpeg.exe',
+    'C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe',
+    'ffmpeg',
+] : ['ffmpeg'];
+
+for (const p of possiblePaths) {
+    if (p === 'ffmpeg') {
+        FFMPEG_PATH = 'ffmpeg';
+        break;
+    }
+    if (fs.existsSync(p)) {
+        FFMPEG_PATH = p;
+        break;
+    }
+}
+
+if (!FFMPEG_PATH) FFMPEG_PATH = 'ffmpeg';
+if (isWin && FFMPEG_PATH === 'ffmpeg') {
+    console.log('[WARN] No system ffmpeg found, using PATH');
 }
 console.log(`[INFO] ffmpeg path: ${FFMPEG_PATH}`);
 
 // ffprobe
-let FFPROBE_PATH = resolveLocalBinary(ffprobePath, 'ffprobe');
-if (FFPROBE_PATH === 'ffprobe') {
-    console.log('[WARN] ffprobe-static not found, using system ffprobe');
+let FFPROBE_PATH = null;
+const ffprobePaths = isWin ? [
+    path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Packages', 'Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe', 'ffmpeg-8.1-full_build', 'bin', 'ffprobe.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'ffmpeg', 'bin', 'ffprobe.exe'),
+    'C:\\ffmpeg\\bin\\ffprobe.exe',
+    'C:\\Program Files\\ffmpeg\\bin\\ffprobe.exe',
+    'ffprobe',
+] : ['ffprobe'];
+
+for (const p of ffprobePaths) {
+    if (p === 'ffprobe') {
+        FFPROBE_PATH = 'ffprobe';
+        break;
+    }
+    if (fs.existsSync(p)) {
+        FFPROBE_PATH = p;
+        break;
+    }
+}
+
+if (!FFPROBE_PATH) FFPROBE_PATH = 'ffprobe';
+if (isWin && FFPROBE_PATH === 'ffprobe') {
+    console.log('[WARN] No system ffprobe found, using PATH');
 }
 console.log(`[INFO] ffprobe path: ${FFPROBE_PATH}`);
 
@@ -358,8 +398,21 @@ function addToHistory(entry) {
 
 async function getAudioInfo(filePath) {
     try {
-        const { stdout } = await execFilePromise(FFPROBE_PATH, ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath], { maxBuffer: 50 * 1024 * 1024 });
-        const data = JSON.parse(stdout);
+        let cmd;
+        if (isWin) {
+            cmd = `cmd /c "chcp 65001 >nul 2>&1 && "${FFPROBE_PATH}" -v quiet -print_format json -show_format -show_streams "${filePath.replace(/\\/g, '\\\\')}" 2>nul"`;
+        } else {
+            cmd = `"${FFPROBE_PATH}" -v quiet -print_format json -show_format -show_streams "${filePath}"`;
+        }
+        console.log('[getAudioInfo] Running:', cmd.substring(0, 150) + '...');
+        const { stdout } = await execPromise(cmd, { maxBuffer: 50 * 1024 * 1024, encoding: 'utf8' });
+        let data;
+        try {
+            data = JSON.parse(stdout);
+        } catch (e) {
+            console.error('[getAudioInfo] JSON parse error, stdout length:', stdout.length, 'first 200 chars:', stdout.substring(0, 200));
+            return null;
+        }
         const format = data.format;
         const stream = data.streams?.[0];
         return {
@@ -371,11 +424,19 @@ async function getAudioInfo(filePath) {
             bitrate: format.bit_rate ? parseInt(format.bit_rate) : 0
         };
     } catch (e) {
+        console.error('[getAudioInfo] Error:', e.message);
         return null;
     }
 }
 
 async function runFfmpeg(args, options = {}) {
+    if (isWin) {
+        const cmd = `cmd /c "chcp 65001 >nul & "${FFMPEG_PATH}" ${args.map(a => `"${a.replace(/"/g, '\\"')}"`).join(' ')} 2>nul"`;
+        return execPromise(cmd, {
+            maxBuffer: 500 * 1024 * 1024,
+            ...options,
+        });
+    }
     return execFilePromise(FFMPEG_PATH, args, {
         maxBuffer: 500 * 1024 * 1024,
         ...options,
@@ -675,7 +736,9 @@ app.post('/api/separate/:jobId', validateJobId, validateJobDir, async (req, res)
 
         // Step 1: Convert to WAV
         emitProgress(jobId, 'progress', { step: 'convert', percent: 10, message: 'Конвертация в WAV...' });
+        console.log('[SEPARATE] Running ffmpeg convert...');
         await runFfmpeg(['-i', inputPath, '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2', '-y', wavPath]);
+        console.log('[SEPARATE] Ffmpeg convert done');
 
         // Step 2: ML separation
         emitProgress(jobId, 'progress', { step: 'separate', percent: 30, message: `Разделение через ${model}...` });
@@ -1141,7 +1204,7 @@ app.get('/api/spectrogram/:jobId', validateJobId, validateJobDir, async (req, re
 
 // ===== HEALTH =====
 
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 // ===== SYSTEM STATUS =====
 

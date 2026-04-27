@@ -265,12 +265,12 @@ def download_models():
 
     try:
         import torch
-        from demucs.api import Pretrained
+        from demucs.pretrained import get_model
 
         # Demucs HT
         print("\n1. Downloading Demucs v4 Hybrid Transformer...", flush=True)
         try:
-            model = Pretrained(name='htdemucs', device='cpu')
+            model = get_model(name='htdemucs')
             print("   [OK] htdemucs downloaded", flush=True)
         except Exception as e:
             print(f"   [ERROR] htdemucs error: {e}", flush=True)
@@ -278,7 +278,7 @@ def download_models():
         # Demucs MDX
         print("\n2. Downloading Demucs MDX...", flush=True)
         try:
-            model = Pretrained(name='mdx', device='cpu')
+            model = get_model(name='mdx')
             print("   [OK] mdx downloaded", flush=True)
         except Exception as e:
             print(f"   [ERROR] mdx error: {e}", flush=True)
