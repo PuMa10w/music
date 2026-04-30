@@ -11,6 +11,8 @@ import EQ from './components/EQ'
 import { useStore } from './stores/useStore'
 import { AnimatePresence, motion } from 'framer-motion'
 import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl, analyzeTrack, masterTrack, replaceVideoAudio, analyzeHarmonic } from './api/api'
+import { useToast } from './hooks/useToast'
+import Toast from './components/Toast'
 
 function App() {
   const files = useStore(s => s.files)
@@ -24,6 +26,7 @@ function App() {
   const [harmonicData, setHarmonicData] = useState<{ key: string, mode: string, tempo: number } | null>(null)
   const [lyrics, setLyrics] = useState<string>('')
   const [masterLufs, setMasterLufs] = useState<number>(-14.0)
+  const { toasts, addToast } = useToast()
 
   // Определяем тип первого файла для превью
   const firstFile = files.length > 0 ? files[0] : null
@@ -115,7 +118,7 @@ function App() {
       setError(null)
       const data = await masterTrack(jobId, stem, masterLufs)
       if (data.success) {
-        alert('Mastering done! Check ' + data.file)
+        addToast('Mastering done! Check ' + data.file, 'success')
       }
     } catch (e: any) {
       setError(e.message || 'Mastering failed')
@@ -134,11 +137,12 @@ function App() {
     // Here you would normally add this to the 'files' state
     // For simplicity, we just log or alert
     console.log('Downloaded:', filename, 'JobId:', jobId)
-    alert(`Скачано: ${filename}. JobId: ${jobId}`)
+    addToast(`Скачано: ${filename}. JobId: ${jobId}`, 'success')
   }
 
   return (
     <ErrorBoundary>
+      <Toast toasts={toasts} addToast={addToast} />
       <motion.div 
         className="min-h-screen bg-gradient-to-br from-gray-900 to-black p-8"
         initial={{ opacity: 0 }}
@@ -237,7 +241,7 @@ function App() {
                                 body: JSON.stringify({ stem: 'vocals', strength: 0.5 })
                               })
                               const data = await res.json()
-                              if (data.success) alert('Denoise done! Check ' + data.file)
+                              if (data.success) addToast('Denoise done! Check ' + data.file, 'success')
                             }}
                             className="px-3 py-1 text-sm bg-green-600 hover:bg-green-700 rounded-lg transition"
                           >
@@ -315,7 +319,7 @@ function App() {
                                   jobResult.files.find(f => f.includes('vocals') || f.includes('instrumental')) || jobResult.files[0], 
                                   'lyrics.txt'
                                 )
-                                if (res.success) alert('Karaoke video created: ' + res.file)
+                                if (res.success) addToast('Karaoke video created: ' + res.file, 'success')
                               } catch (e: any) {
                                 setError(e.message || 'Karaoke failed')
                               }
@@ -330,7 +334,7 @@ function App() {
                                 const audioFile = jobResult.files.find(f => f.includes('instrumental')) || jobResult.files[0]
                                 const videoFile = jobResult.files.find(f => f.includes('.mp4') || f.includes('video')) || 'input_video.mp4'
                                 const res = await replaceVideoAudio(jobResult.jobId, videoFile, audioFile)
-                                if (res.success) alert('Audio replaced! Check ' + res.file)
+                                if (res.success) addToast('Audio replaced! Check ' + res.file, 'success')
                               } catch (e: any) {
                                 setError(e.message || 'Replace audio failed')
                               }
