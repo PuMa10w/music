@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # Node.js API Server
+  app:
+    build: 
+      context: ./music
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./music:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=production
+      - PYTHON_PATH=/usr/bin/python3
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # Python Worker for Demucs
+  python-worker:
+    build:
+      context: ./music
+      dockerfile: Dockerfile.python
+    volumes:
+      - ./music/uploads:/app/uploads
+      - ./music/outputs:/app/outputs
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # Redis for Queue
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:
