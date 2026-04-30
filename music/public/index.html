@@ -765,6 +765,13 @@
 
                             <div class="stems-grid" id="stemsContainer"></div>
                            
+                           <!-- Spectrogram Section -->
+                           <div class="premium-card" id="spectrogramSection" style="margin-top: 20px; display: none;">
+                               <h5><i class="bi bi-bar-chart-fill"></i> Спектрограмма</h5>
+                               <canvas id="spectrogramCanvas" width="800" height="200" style="width:100%; background:#121212; border-radius: 8px;"></canvas>
+                               <button class="btn btn-sm btn-outline-light mt-2" onclick="drawSpectrogram()">Обновить</button>
+                           </div>
+
                            <!-- Denoise Section -->
                            <div class="premium-card" id="denoiseSection" style="margin-top: 20px; display: none;">
                                <h5><i class="bi bi-volume-mute-fill"></i> Шумоподавление</h5>

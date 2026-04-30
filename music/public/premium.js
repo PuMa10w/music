@@ -102,7 +102,85 @@ function applyEQ(jobId) {
     });
 }
 
-// ===== DENOISE FUNCTIONS =====
+// ===== SPECTROGRAM FUNCTIONS =====
+let audioContext = null;
+let analyser = null;
+let spectrogramRunning = false;
+
+function drawSpectrogram() {
+    const canvas = document.getElementById('spectrogramCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const jobId = window.currentJobId; // Try to get from global scope
+
+    if (!jobId) {
+        // Draw placeholder if no track loaded
+        ctx.fillStyle = '#121212';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#666';
+        ctx.font = '16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Загрузи трек и нажми "Обработать" или "Play"', canvas.width/2, canvas.height/2);
+        return;
+    }
+
+    // If there's an audio element playing, try to hook into it
+    const audioEl = document.querySelector(`audio[data-job="${jobId}"]`) || document.querySelector('audio');
+    if (!audioEl) {
+         ctx.fillStyle = '#121212'; ctx.fillRect(0,0,canvas.width,canvas.height);
+         ctx.fillStyle = '#666'; ctx.font = '16px Arial'; ctx.textAlign = 'center';
+         ctx.fillText('Сначала запусти проигрывание стема', canvas.width/2, canvas.height/2);
+        return;
+    }
+
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 2048;
+        
+        const source = audioContext.createMediaElementSource(audioEl);
+        source.connect(analyser);
+        analyser.connect(audioContext.destination);
+    }
+
+    if (audioContext.state === 'suspended') {
+        audioContext.resume();
+    }
+
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    
+    function renderFrame() {
+        if (!spectrogramRunning) return;
+        requestAnimationFrame(renderFrame);
+        
+        analyser.getByteFrequencyData(dataArray);
+        
+        ctx.fillStyle = 'rgba(18, 18, 18, 0.1)'; // Fade effect
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        const barWidth = (canvas.width / bufferLength) * 2.5;
+        let barHeight;
+        let x = 0;
+        
+        for(let i = 0; i < bufferLength; i++) {
+            barHeight = dataArray[i] / 2;
+            
+            // Color gradient: low freq = red, high freq = blue
+            const gradient = ctx.createLinearGradient(0, canvas.height - barHeight, 0, canvas.height);
+            gradient.addColorStop(0, `rgb(${barHeight + 100}, 50, 255)`);
+            gradient.addColorStop(1, `rgb(255, 50, ${barHeight + 100})`);
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+            
+            x += barWidth + 1;
+        }
+    }
+    
+    spectrogramRunning = true;
+    renderFrame();
+}
 function applyDenoise(jobId, stem = 'vocals') {
     if (!jobId) {
         alert('Сначала загрузи и обработай трек!');
