@@ -824,6 +824,16 @@
                            <!-- 10-Band EQ Section -->
                            <div class="premium-card" id="eqSection" style="margin-top: 20px; display: none;">
                                <h5><i class="bi bi-sliders"></i> 10-Band Equalizer</h5>
+                               <div class="d-flex align-items-center gap-3 mb-3">
+                                   <label class="text-muted">Пресет:</label>
+                                   <select class="form-select form-select-sm" style="width: auto;" onchange="applyEQPreset(this.value)">
+                                       <option value="flat">Flat</option>
+                                       <option value="rock">Rock</option>
+                                       <option value="pop">Pop</option>
+                                       <option value="jazz">Jazz</option>
+                                       <option value="vocal_boost">Vocal Boost</option>
+                                   </select>
+                               </div>
                                <div id="eqSliders" class="d-flex justify-content-between flex-wrap gap-2">
                                    <!-- JS сгенерирует ползунки -->
                                </div>

@@ -17,6 +17,14 @@ const EQ_BANDS = [
     { freq: 16000, label: '16kHz' }
 ];
 
+const EQ_PRESETS = {
+    flat: { name: 'Flat', gains: [0,0,0,0,0,0,0,0,0,0] },
+    rock: { name: 'Rock', gains: [5,4,2,0,1,2,3,4,5,6] },
+    pop: { name: 'Pop', gains: [2,1,0,1,3,4,3,2,1,0] },
+    jazz: { name: 'Jazz', gains: [3,2,1,0,1,2,3,2,1,0] },
+    vocal_boost: { name: 'Vocal Boost', gains: [0,0,0,1,3,5,4,3,2,1] }
+};
+
 let denoiseStrength = 0.5;
 let eqValues = {};
 
@@ -192,6 +200,19 @@ function resetEQ() {
             updateEQValue(slider);
         }
     });
+}
+
+function applyEQPreset(presetName) {
+    const preset = EQ_PRESETS[presetName];
+    if (!preset) return;
+    EQ_BANDS.forEach((band, idx) => {
+        const slider = document.querySelector(`input[data-freq="${band.freq}"]`);
+        if (slider) {
+            slider.value = preset.gains[idx];
+            updateEQValue(slider);
+        }
+    });
+    alert(`EQ Preset: ${preset.name}`);
 }
 
 function applyEQ(jobId) {
