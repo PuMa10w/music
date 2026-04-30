@@ -9,6 +9,7 @@ import VideoPreview from './components/VideoPreview'
 import Spectrogram from './components/Spectrogram'
 import EQ from './components/EQ'
 import { useStore } from './stores/useStore'
+import { AnimatePresence, motion } from 'framer-motion'
 import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl, analyzeTrack, masterTrack, replaceVideoAudio } from './api/api'
 
 function App() {
@@ -121,7 +122,12 @@ function App() {
 
   return (
     <ErrorBoundary>
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black p-8">
+      <motion.div 
+        className="min-h-screen bg-gradient-to-br from-gray-900 to-black p-8"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5 }}
+      >
         <header className="max-w-6xl mx-auto backdrop-blur-lg bg-white/10 rounded-2xl p-6 shadow-xl border border-white/20 mb-8">
           <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent">
             Voice Remover Ultra
@@ -324,8 +330,8 @@ function App() {
           {/* Спектрограмма для превью */}
           {!isVideo && previewUrl && <Spectrogram audioUrl={previewUrl} />}
         </main>
-      </div>
-    </ErrorBoundary>
+    </motion.div>
+  </ErrorBoundary>
   )
 }
 

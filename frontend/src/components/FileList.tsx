@@ -1,4 +1,5 @@
 import { useStore } from '../stores/useStore'
+import { motion } from 'framer-motion'
 
 export default function FileList() {
   const files = useStore(s => s.files)
@@ -19,12 +20,18 @@ export default function FileList() {
       </div>
       <div className="space-y-2">
         {files.map((file, idx) => (
-          <div key={idx} className="flex items-center justify-between bg-black/30 p-3 rounded-lg">
+          <motion.div 
+            key={idx} 
+            className="flex items-center justify-between bg-black/30 p-3 rounded-lg"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: idx * 0.1 }}
+          >
             <span className="truncate">{file.name}</span>
             <span className="text-gray-500 text-sm">
               {(file.size / 1024 / 1024).toFixed(2)} MB
             </span>
-          </div>
+          </motion.div>
         ))}
       </div>
     </div>
