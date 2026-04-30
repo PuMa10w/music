@@ -1393,6 +1393,27 @@ app.post('/api/denoise/:jobId', validateJobId, validateJobDir, async (req, res) 
     }
 });
 
+// ===== MASTERING ENDPOINT =====
+app.post('/api/master/:jobId', validateJobId, validateJobDir, async (req, res) => {
+    const jobId = req.params.jobId;
+    const jobDir = path.join(UPLOAD_DIR, jobId);
+    const { stem = 'instrumental', target_lufs = -14.0 } = req.body;
+
+    try {
+        const inputFile = path.join(jobDir, `${stem}.wav`);
+        if (!fs.existsSync(inputFile)) {
+            return res.status(404).json({ error: `File ${stem}.wav not found` });
+        }
+        const outputFile = path.join(jobDir, `${stem}_mastered.wav`);
+        const scriptPath = path.join(__dirname, 'mastering.py');
+        await runPythonScript(scriptPath, [inputFile, outputFile, String(target_lufs)]);
+        res.json({ success: true, file: `${stem}_mastered.wav`, path: outputFile });
+    } catch (error) {
+        console.error('[Mastering Error]', error);
+        res.status(500).json({ error: 'Mastering failed', details: error.message });
+    }
+});
+
 // ===== STATUS & DOWNLOAD API =====
 
 // Получить статус задачи (для поллинга)

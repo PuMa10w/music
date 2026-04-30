@@ -70,3 +70,12 @@ export async function analyzeTrack(jobId: string) {
   const res = await fetch(`${API_BASE}/analyze/${jobId}`, { method: 'POST' })
   return res.json()
 }
+
+export async function masterTrack(jobId: string, stem: string = 'instrumental', targetLufs: number = -14.0) {
+  const res = await fetch(`${API_BASE}/master/${jobId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stem, target_lufs: targetLufs })
+  })
+  return res.json()
+}

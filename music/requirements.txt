@@ -5,3 +5,6 @@ flask
 librosa
 numpy
 scipy
+pyloudnorm
+pydub
+soundfile
