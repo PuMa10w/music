@@ -3,6 +3,7 @@ import UploadZone from './components/UploadZone'
 import FileList from './components/FileList'
 import Waveform from './components/Waveform'
 import VideoPreview from './components/VideoPreview'
+import Spectrogram from './components/Spectrogram'
 import EQ from './components/EQ'
 import { useStore } from './stores/useStore'
 import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl } from './api/api'
@@ -190,6 +191,9 @@ function App() {
             <VideoPreview file={firstFile} /> : 
             previewUrl ? <Waveform audioUrl={previewUrl} height={150} /> : null
         )}
+
+        {/* Спектрограмма для превью */}
+        {!isVideo && previewUrl && <Spectrogram audioUrl={previewUrl} />}
       </main>
     </div>
   )
