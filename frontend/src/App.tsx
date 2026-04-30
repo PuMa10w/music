@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import UploadZone from './components/UploadZone'
+import UrlInput from './components/UrlInput'
 import FileList from './components/FileList'
 import Waveform from './components/Waveform'
 import VideoPreview from './components/VideoPreview'
@@ -106,6 +107,15 @@ function App() {
     { name: 'CD', lufs: -10.0 },
   ]
 
+  const handleUrlDownloadComplete = (jobId: string, filename: string) => {
+    // Create a mock file object and add to store
+    const mockFile = new File([], filename, { type: 'audio/wav' })
+    // Here you would normally add this to the 'files' state
+    // For simplicity, we just log or alert
+    console.log('Downloaded:', filename, 'JobId:', jobId)
+    alert(`Скачано: ${filename}. JobId: ${jobId}`)
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black p-8">
       <header className="max-w-6xl mx-auto backdrop-blur-lg bg-white/10 rounded-2xl p-6 shadow-xl border border-white/20 mb-8">
@@ -118,6 +128,7 @@ function App() {
       <main className="max-w-6xl mx-auto space-y-6">
         <div className="backdrop-blur-lg bg-white/5 rounded-2xl p-8 border border-white/10">
           <UploadZone />
+          <UrlInput onDownloadComplete={handleUrlDownloadComplete} />
           <FileList />
         </div>
 

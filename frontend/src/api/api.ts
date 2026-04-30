@@ -79,3 +79,12 @@ export async function masterTrack(jobId: string, stem: string = 'instrumental', 
   })
   return res.json()
 }
+
+export async function downloadExternal(url: string) {
+  const res = await fetch(`${API_BASE}/download-external`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url })
+  })
+  return res.json()
+}

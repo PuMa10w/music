@@ -1414,6 +1414,37 @@ app.post('/api/master/:jobId', validateJobId, validateJobDir, async (req, res) =
     }
 });
 
+// ===== DOWNLOAD EXTERNAL (YouTube, etc.) =====
+app.post('/api/download-external', async (req, res) => {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL is required' });
+
+    const jobId = uuidv4();
+    const jobDir = safePath(UPLOAD_DIR, jobId);
+    fs.mkdirSync(jobDir, { recursive: true });
+
+    try {
+        const scriptPath = path.join(__dirname, 'download_song.py');
+        // Run download script
+        const result = await runPythonScript(scriptPath, [url, jobDir]);
+        const parsed = JSON.parse(result);
+        
+        if (parsed.error) {
+            return res.status(500).json({ error: parsed.error });
+        }
+
+        res.json({ 
+            success: true, 
+            jobId, 
+            filename: parsed.filename,
+            path: parsed.path 
+        });
+    } catch (error) {
+        console.error('[Download External Error]', error);
+        res.status(500).json({ error: 'Download failed', details: error.message });
+    }
+});
+
 // ===== STATUS & DOWNLOAD API =====
 
 // Получить статус задачи (для поллинга)
