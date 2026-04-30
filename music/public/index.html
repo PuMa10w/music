@@ -765,6 +765,16 @@
 
                             <div class="stems-grid" id="stemsContainer"></div>
                            
+                           <!-- Track Info Section -->
+                           <div class="premium-card" id="trackInfoSection" style="margin-top: 20px; display: none;">
+                               <h5><i class="bi bi-info-circle-fill"></i> Инфо о треке</h5>
+                               <div id="trackInfoContent" class="d-flex gap-3">
+                                   <span id="bpmBadge" class="badge bg-primary" style="font-size: 1.2em; display: none;">BPM: ...</span>
+                                   <span id="keyBadge" class="badge bg-success" style="font-size: 1.2em; display: none;">Key: ...</span>
+                                   <button class="btn btn-sm btn-outline-light" onclick="analyzeTrack(currentJobId)">Анализировать</button>
+                               </div>
+                           </div>
+
                            <!-- Spectrogram Section -->
                            <div class="premium-card" id="spectrogramSection" style="margin-top: 20px; display: none;">
                                <h5><i class="bi bi-bar-chart-fill"></i> Спектрограмма</h5>

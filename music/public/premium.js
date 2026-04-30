@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function showPremiumFeatures() {
-    ['eqSection', 'denoiseSection', 'vocalFxSection', 'spectrogramSection'].forEach(id => {
+    ['eqSection', 'denoiseSection', 'vocalFxSection', 'spectrogramSection', 'trackInfoSection'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = 'block';
     });
@@ -37,6 +37,49 @@ function showPremiumFeatures() {
 
 // Make it global for ws-progress.js to call
 window.showPremiumFeatures = showPremiumFeatures;
+
+// ===== ANALYZE TRACK =====
+function analyzeTrack(jobId) {
+    if (!jobId) {
+        alert('Сначала загрузи трек!');
+        return;
+    }
+
+    const btn = event.target.closest('button');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-gear-fill spin"></i> Анализ...';
+    }
+
+    fetch(`/api/analyze/${jobId}`)
+    .then(res => res.json())
+    .then(data => {
+        const bpmBadge = document.getElementById('bpmBadge');
+        const keyBadge = document.getElementById('keyBadge');
+        
+        if (data.bpm) {
+            bpmBadge.innerText = `BPM: ${data.bpm}`;
+            bpmBadge.style.display = 'inline-block';
+        }
+        if (data.key) {
+            keyBadge.innerText = `Key: ${data.key}`;
+            keyBadge.style.display = 'inline-block';
+        }
+        if (!data.bpm && !data.key) {
+            alert('Не удалось проанализировать трек');
+        }
+    })
+    .catch(err => {
+        console.error('[Analyze] Error:', err);
+        alert('Ошибка анализа');
+    })
+    .finally(() => {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = 'Анализировать';
+        }
+    });
+}
 
 // ===== VOCAL FX FUNCTIONS =====
 function applyVocalFX(jobId, stem, effect) {
