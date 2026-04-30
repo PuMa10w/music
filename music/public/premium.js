@@ -37,14 +37,86 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function showPremiumFeatures() {
-    ['eqSection', 'denoiseSection', 'vocalFxSection', 'spectrogramSection', 'trackInfoSection'].forEach(id => {
+    ['eqSection', 'denoiseSection', 'vocalFxSection', 'spectrogramSection', 'trackInfoSection', 'abTestSection'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = 'block';
     });
+
+    // Auto-setup A/B Testing if we have jobId
+    if (window.currentJobId && window.originalFilename) {
+        const originalPath = `/uploads/${window.currentJobId}/${window.originalFilename}`;
+        // Try to guess result path (first stem, e.g., vocals.wav)
+        const firstStem = document.querySelector('[id^="stem_"]');
+        if (firstStem) {
+            setupABTesting(originalPath, firstStem.src);
+        }
+    }
 }
 
 // Make it global for ws-progress.js to call
 window.showPremiumFeatures = showPremiumFeatures;
+
+// ===== A/B TESTING =====
+let currentABVersion = null;
+let abAudioA = null;
+let abAudioB = null;
+
+function setupABTesting(originalPath, resultPath) {
+    const audioA = document.getElementById('audioA');
+    const audioB = document.getElementById('audioB');
+    const btnA = document.getElementById('btnVersionA');
+    const btnB = document.getElementById('btnVersionB');
+    
+    if (!audioA || !audioB) return;
+    
+    // Set sources
+    audioA.src = originalPath;
+    audioB.src = resultPath;
+    abAudioA = audioA;
+    abAudioB = audioB;
+    
+    // Show audio players
+    audioA.style.display = 'block';
+    audioB.style.display = 'block';
+    
+    // Update button states
+    btnA.disabled = false;
+    btnB.disabled = false;
+    btnA.innerHTML = '<i class="bi bi-file-earmark-music"></i> Оригинал (A)';
+    btnB.innerHTML = '<i class="bi bi-music-note"></i> Результат (B)';
+    
+    console.log('[A/B] Setup complete:', { originalPath, resultPath });
+}
+
+function playVersion(version) {
+    const audioA = document.getElementById('audioA');
+    const audioB = document.getElementById('audioB');
+    const badge = document.getElementById('currentVersion');
+    
+    if (version === 'A') {
+        if (audioB) audioB.pause();
+        if (audioA) {
+            audioA.play();
+            currentABVersion = 'A';
+            if (badge) badge.innerText = 'A: Оригинал';
+        }
+    } else if (version === 'B') {
+        if (audioA) audioA.pause();
+        if (audioB) {
+            audioB.play();
+            currentABVersion = 'B';
+            if (badge) badge.innerText = 'B: Результат';
+        }
+    }
+}
+
+function toggleAB() {
+    if (currentABVersion === 'A') {
+        playVersion('B');
+    } else {
+        playVersion('A');
+    }
+}
 
 // ===== ANALYZE TRACK =====
 function analyzeTrack(jobId) {

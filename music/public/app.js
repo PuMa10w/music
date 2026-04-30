@@ -528,12 +528,16 @@ function updateList() {
 function selectFile(i) {
     currentIdx = i;
     currentJob = files[i]?.jobId;
+    // Save original filename for A/B testing
+    window.originalFilename = files[i]?.filename;
+    window.currentJobId = currentJob; // Ensure it's set for premium.js
+    
     document.querySelectorAll('.file-item').forEach((item, idx) => {
         item.classList.toggle('active', idx === i);
     });
     loadPreview(currentJob);
     updateWorkspaceState({ status: currentJob ? 'Файл готов' : 'Ожидание' });
-    
+
     // Инициализировать WebSocket для прогресса
     initWebSocketProgress();
 }
@@ -1296,6 +1300,21 @@ function renderMultiStems(stems, count) {
     }).join('');
 
     syncAudios(Object.keys(stems).map(k => `stem_${k}`));
+    
+    // Setup A/B Testing if premium features are visible
+    if (window.originalFilename && window.currentJobId) {
+        const originalPath = `/uploads/${window.currentJobId}/${window.originalFilename}`;
+        // Get first stem as result B (usually vocals or the first available stem)
+        const firstStemKey = Object.keys(stems)[0];
+        if (firstStemKey) {
+            const stemAudio = $(`stem_${firstStemKey}`);
+            if (stemAudio && stemAudio.src) {
+                if (window.setupABTesting) {
+                    window.setupABTesting(originalPath, stemAudio.src);
+                }
+            }
+        }
+    }
 }
 
 function syncAudios(ids) {
