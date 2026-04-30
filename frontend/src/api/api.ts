@@ -8,6 +8,7 @@ export async function uploadFile(file: File): Promise<{ jobId: string }> {
     method: 'POST',
     body: formData
   })
+  if (!res.ok) throw new Error('Upload failed')
   return res.json()
 }
 
@@ -17,7 +18,12 @@ export async function startSeparation(jobId: string, params: {
   preset: string
   vocalStrength?: number
 }) {
-  const res = await fetch(`${API_BASE}/separate/${jobId}`, {
+  let endpoint = `${API_BASE}/separate/${jobId}`
+  // Выбираем эндпоинт в зависимости от режима
+  if (params.mode === '4stem') endpoint = `${API_BASE}/stems/${jobId}`
+  if (params.mode === '6stem') endpoint = `${API_BASE}/stems6/${jobId}`
+
+  const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params)
@@ -25,4 +31,37 @@ export async function startSeparation(jobId: string, params: {
   return res.json()
 }
 
-// Добавим позже: 4stem, 6stem, пресеты, шумоподавление...
+export async function checkStatus(jobId: string): Promise<{ status: string, result?: any }> {
+  const res = await fetch(`${API_BASE}/status/${jobId}`)
+  return res.json()
+}
+
+export function getDownloadUrl(jobId: string, filename: string): string {
+  return `${API_BASE}/download/${jobId}/${filename}`
+}
+
+// Поллинг: опрашиваем сервер, пока не будет готово
+export async function pollJobStatus(
+  jobId: string, 
+  onProgress: (status: string) => void,
+  interval = 2000
+): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const timer = setInterval(async () => {
+      try {
+        const data = await checkStatus(jobId)
+        onProgress(data.status)
+        if (data.status === 'completed') {
+          clearInterval(timer)
+          resolve(data)
+        } else if (data.status === 'error') {
+          clearInterval(timer)
+          reject(new Error(data.error || 'Processing failed'))
+        }
+      } catch (e) {
+        clearInterval(timer)
+        reject(e)
+      }
+    }, interval)
+  })
+}

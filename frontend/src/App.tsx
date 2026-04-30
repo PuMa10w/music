@@ -4,33 +4,39 @@ import FileList from './components/FileList'
 import Waveform from './components/Waveform'
 import EQ from './components/EQ'
 import { useStore } from './stores/useStore'
-import { uploadFile, startSeparation } from './api/api'
+import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl } from './api/api'
 
 function App() {
   const files = useStore(s => s.files)
   const currentMode = useStore(s => s.currentMode)
   const setMode = useStore(s => s.setMode)
   const [processing, setProcessing] = useState(false)
-  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [results, setResults] = useState<{ jobId: string, files: string[] } | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const handleProcess = async () => {
     if (!files.length) return
     setProcessing(true)
+    setError(null)
+    setResults(null)
     try {
-      // Upload first file for demo
       const res = await uploadFile(files[0])
       if (res.jobId) {
-        // Start separation
-        const result = await startSeparation(res.jobId, {
+        const sepRes = await startSeparation(res.jobId, {
           model: 'modern_ensemble',
           mode: currentMode,
           preset: 'default'
         })
-        console.log('Separation result:', result)
-        // TODO: poll for completion and set audioUrl
+        // Start polling
+        const data = await pollJobStatus(res.jobId, (status) => {
+          console.log('Status:', status)
+        })
+        if (data.status === 'completed') {
+          setResults({ jobId: res.jobId, files: data.files || [] })
+        }
       }
-    } catch (e) {
-      console.error(e)
+    } catch (e: any) {
+      setError(e.message || 'Processing failed')
     } finally {
       setProcessing(false)
     }
@@ -79,11 +85,34 @@ function App() {
           </div>
         )}
 
-        {files.length > 0 && <EQ />}
-
-        {audioUrl && (
-          <Waveform audioUrl={audioUrl} height={150} />
+        {error && (
+          <div className="backdrop-blur-lg bg-red-500/20 border border-red-500/50 rounded-2xl p-4 text-red-200">
+            Ошибка: {error}
+          </div>
         )}
+
+        {results && (
+          <div className="backdrop-blur-lg bg-white/5 rounded-2xl p-6 border border-white/10">
+            <h3 className="text-xl mb-4">Результаты</h3>
+            <div className="flex flex-wrap gap-4">
+              {results.files.map((file: string) => (
+                <a
+                  key={file}
+                  href={getDownloadUrl(results.jobId, file)}
+                  download
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition flex items-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  {file}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {files.length > 0 && <EQ />}
       </main>
     </div>
   )
