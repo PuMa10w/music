@@ -65,3 +65,8 @@ export async function pollJobStatus(
     }, interval)
   })
 }
+
+export async function analyzeTrack(jobId: string) {
+  const res = await fetch(`${API_BASE}/analyze/${jobId}`, { method: 'POST' })
+  return res.json()
+}
