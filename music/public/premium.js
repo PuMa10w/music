@@ -131,6 +131,50 @@ function showPremiumFeatures() {
 // Make it global for ws-progress.js to call
 window.showPremiumFeatures = showPremiumFeatures;
 
+// ===== EXPORT/IMPORT PRESETS =====
+function exportPresets() {
+    const customPresets = loadCustomPresets();
+    if (Object.keys(customPresets).length === 0) {
+        alert('Нет кастомных пресетов для экспорта!');
+        return;
+    }
+    const dataStr = JSON.stringify(customPresets, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'voice_remover_presets.json';
+    link.click();
+    URL.revokeObjectURL(url);
+    alert('Пресеты экспортированы!');
+}
+
+function importPresets() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const imported = JSON.parse(event.target.result);
+                let current = loadCustomPresets();
+                // Merge: new presets overwrite old ones with the same name
+                current = { ...current, ...imported };
+                localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(current));
+                updatePresetSelector();
+                alert('Пресеты импортированы!');
+            } catch (err) {
+                alert('Ошибка чтения JSON!');
+            }
+        };
+        reader.readAsText(file);
+    };
+    input.click();
+}
+
 // ===== A/B TESTING =====
 let currentABVersion = null;
 let abAudioA = null;

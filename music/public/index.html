@@ -861,7 +861,15 @@
                                <div id="eqSliders" class="d-flex justify-content-between flex-wrap gap-2">
                                    <!-- JS сгенерирует ползунки -->
                                </div>
-                               <button class="btn btn-sm btn-outline-light mt-2" onclick="resetEQ()">Сброс</button>
+                               <div class="d-flex gap-2 mt-2">
+                                   <button class="btn btn-sm btn-outline-light" onclick="resetEQ()">Сброс</button>
+                                   <button class="btn btn-sm btn-outline-success" onclick="exportPresets()">
+                                       <i class="bi bi-box-arrow-up"></i> Экспорт
+                                   </button>
+                                   <button class="btn btn-sm btn-outline-info" onclick="importPresets()">
+                                       <i class="bi bi-box-arrow-in"></i> Импорт
+                                   </button>
+                               </div>
                            </div>
 
                            <!-- Vocal FX Section -->

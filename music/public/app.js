@@ -78,6 +78,9 @@ function initWebSocketProgress() {
 let files = [];
 let currentIdx = 0;
 let currentJob = null;
+let currentMode = '2stem'; // Global mode state
+let currentQuality = 'default';
+let currentPreset = 'default';
 let mode = '2stem';
 let vocalStrength = 50; // 0-100 for mix mode
 let quality = 'quality';
@@ -558,6 +561,81 @@ function clearFiles() {
     saveSession();
 }
 
+// ===== BATCH PROCESSING =====
+async function processAllFiles() {
+    if (!files.length) {
+        toast('Нет файлов для обработки!', 'warning');
+        return;
+    }
+    const btn = document.getElementById('btnProcessAll');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-gear-fill spin"></i> ОБРАБОТКА...';
+    }
+    const statusBadge = document.getElementById('batchStatus');
+    if (statusBadge) statusBadge.style.display = 'inline-block';
+
+    let completed = 0;
+    const total = files.length;
+
+    // Global settings (use the variables defined at the top of the file)
+    const vocalStrength = document.getElementById('vocalStrength')?.value / 100 || 0.5;
+    // currentMode, currentPreset, currentModel are global variables updated by UI functions
+
+    for (let i = 0; i < total; i++) {
+        const file = files[i];
+        if (!file?.jobId) continue;
+
+        if (statusBadge) statusBadge.innerText = `${completed}/${total}`;
+
+        let res;
+        try {
+            if (currentMode === '2stem') {
+                res = await fetch(`${api()}/api/separate/${file.jobId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ vocalStrength, preset: currentPreset, mode: currentMode, model: selectedModel })
+                });
+            } else if (currentMode === '4stem') {
+                res = await fetch(`${api()}/api/stems/${file.jobId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ strength: vocalStrength, preset: currentPreset, mode: currentMode, model: selectedModel })
+                });
+            } else if (currentMode === '6stem') {
+                res = await fetch(`${api()}/api/stems6/${file.jobId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ strength: vocalStrength, preset: currentPreset, mode: currentMode, model: selectedModel })
+                });
+            } else {
+                // Fallback to separate
+                res = await fetch(`${api()}/api/separate/${file.jobId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ vocalStrength, preset: currentPreset, mode: currentMode, model: selectedModel })
+                });
+            }
+
+            const data = await res.json();
+            if (data.error) {
+                console.error(`Batch error for ${file.filename}:`, data.error);
+            } else {
+                completed++;
+                if (statusBadge) statusBadge.innerText = `${completed}/${total}`;
+            }
+        } catch (e) {
+            console.error(`Batch error for ${file.filename}:`, e);
+        }
+    }
+
+    if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-lightning-charge-fill"></i> ОБРАБОТАТЬ ВСЁ';
+    }
+    toast(`Готово! Обработано ${completed} из ${total} файлов.`, 'success');
+}
+
 // ==================== PREVIEW & WAVEFORM ====================
 async function loadPreview(jobId) {
     if (!jobId) return;
@@ -648,6 +726,7 @@ function drawFakeWave(ctx, w, h) {
 // ==================== MODE & QUALITY ====================
 function setMode(m) {
     mode = m;
+    currentMode = m; // Update global
     document.querySelectorAll('.mode-option').forEach(c => c.classList.remove('active'));
     document.querySelector(`.mode-option[data-mode="${m}"]`).classList.add('active');
 
@@ -804,19 +883,19 @@ async function processBatchJob(job) {
         res = await fetch(`${api()}/api/separate/${jobId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vocalStrength: vocalStrength, preset: currentPreset, mode: mode, model: currentModel })
+            body: JSON.stringify({ vocalStrength: vocalStrength, preset: currentPreset, mode: mode, model: selectedModel })
         });
     } else if (currentMode === '4stem') {
         res = await fetch(`${api()}/api/stems/${jobId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ strength, preset: currentPreset, mode: currentQuality, model: currentModel })
+            body: JSON.stringify({ strength, preset: currentPreset, mode: currentQuality, model: selectedModel })
         });
     } else if (currentMode === '6stem') {
         res = await fetch(`${api()}/api/stems6/${jobId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ strength, preset: currentPreset, mode: currentQuality, model: currentModel })
+            body: JSON.stringify({ strength, preset: currentPreset, mode: currentQuality, model: selectedModel })
         });
     }
 
