@@ -1,5 +1,19 @@
 const API_BASE = '/api'
 
+export interface TimedLyricSegment {
+  start: number
+  end: number
+  text: string
+}
+
+export interface TranscriptionResult {
+  success: boolean
+  lyricsFile: string
+  path: string
+  data: TimedLyricSegment[]
+  message: string
+}
+
 export async function uploadFile(file: File): Promise<{ jobId: string }> {
   const formData = new FormData()
   formData.append('file', file)
@@ -107,7 +121,7 @@ export async function createKaraoke(jobId: string, videoFile: string, lyricsFile
   return res.json()
 }
 
-export async function transcribeTrack(jobId: string) {
+export async function transcribeTrack(jobId: string): Promise<TranscriptionResult> {
   const res = await fetch(`${API_BASE}/transcribe/${jobId}`, {
     method: 'POST'
   })

@@ -1463,7 +1463,7 @@ app.post('/api/transcribe/:jobId', validateJobId, validateJobDir, async (req, re
         }
 
         const vocalsPath = path.join(jobDir, vocalsFile);
-        const lyricsPath = path.join(jobDir, 'lyrics.txt');
+        const lyricsPath = path.join(jobDir, 'lyrics.json');
 
         // Validate audio file before transcription
         const validation = await validateAudioFile(vocalsPath);
@@ -1478,18 +1478,22 @@ app.post('/api/transcribe/:jobId', validateJobId, validateJobDir, async (req, re
             return res.status(500).json({ error: 'Transcription failed: lyrics file not created' });
         }
 
+        // Read and return JSON data
+        const lyricsData = JSON.parse(fs.readFileSync(lyricsPath, 'utf-8'));
+
         // Add to history
         addToHistory({
             id: jobId,
             action: 'transcribe',
             timestamp: new Date().toISOString(),
-            details: { vocalsFile, lyricsFile: 'lyrics.txt' }
+            details: { vocalsFile, lyricsFile: 'lyrics.json', segments: lyricsData.length }
         });
 
         res.json({ 
             success: true, 
-            lyricsFile: 'lyrics.txt', 
+            lyricsFile: 'lyrics.json', 
             path: lyricsPath,
+            data: lyricsData,
             message: 'Transcription completed successfully'
         });
     } catch (error) {
