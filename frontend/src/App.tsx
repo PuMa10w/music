@@ -141,21 +141,44 @@ function App() {
         {results && (
           <div className="backdrop-blur-lg bg-white/5 rounded-2xl p-6 border border-white/10">
             <h3 className="text-xl mb-4">Результаты</h3>
-            <div className="flex flex-wrap gap-4">
-              {results.files.map((file: string) => (
-                <a
-                  key={file}
-                  href={getDownloadUrl(results.jobId, file)}
-                  download
-                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition flex items-center gap-2"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                  {file}
-                </a>
-              ))}
-            </div>
+            {results.map((jobResult, jobIdx) => (
+              <div key={jobIdx} className="mb-6 last:mb-0">
+                <h4 className="text-lg text-gray-300 mb-2">Job {jobIdx + 1}</h4>
+                <div className="flex flex-wrap gap-4">
+                  {jobResult.files.map((file: string) => (
+                    <div key={file} className="flex flex-col gap-2">
+                      <a
+                        href={getDownloadUrl(jobResult.jobId, file)}
+                        download
+                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition flex items-center gap-2"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        {file}
+                      </a>
+                      {file.includes('vocals') && (
+                        <button
+                          onClick={async () => {
+                            // Call denoise API
+                            const res = await fetch(`/api/denoise/${jobResult.jobId}`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ stem: 'vocals', strength: 0.5 })
+                            })
+                            const data = await res.json()
+                            if (data.success) alert('Denoise done! Check ' + data.file)
+                          }}
+                          className="px-3 py-1 text-sm bg-green-600 hover:bg-green-700 rounded-lg transition"
+                        >
+                          Denoise
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
