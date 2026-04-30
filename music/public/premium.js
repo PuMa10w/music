@@ -25,6 +25,71 @@ const EQ_PRESETS = {
     vocal_boost: { name: 'Vocal Boost', gains: [0,0,0,1,3,5,4,3,2,1] }
 };
 
+// ===== CUSTOM PRESETS (localStorage) =====
+const CUSTOM_PRESETS_KEY = 'voiceRemoverCustomPresets';
+const LAST_PRESET_KEY = 'voiceRemoverLastPreset';
+
+function saveCustomPreset(name) {
+    if (!name) { alert('Введите имя пресета!'); return; }
+    const gains = [];
+    EQ_BANDS.forEach(band => {
+        const slider = document.querySelector(`input[data-freq="${band.freq}"]`);
+        gains.push(slider ? parseFloat(slider.value) : 0);
+    });
+    let customPresets = loadCustomPresets();
+    customPresets[name] = { name, gains };
+    localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(customPresets));
+    alert(`Пресет '${name}' сохранён!`);
+    updatePresetSelector();
+}
+
+function loadCustomPresets() {
+    const data = localStorage.getItem(CUSTOM_PRESETS_KEY);
+    if (data) {
+        try { return JSON.parse(data); } catch(e) { return {}; }
+    }
+    return {};
+}
+
+function applyEQPreset(presetName) {
+    let gains;
+    if (presetName.startsWith('custom_')) {
+        const name = presetName.replace('custom_', '');
+        const customPresets = loadCustomPresets();
+        const preset = customPresets[name];
+        if (!preset) return;
+        gains = preset.gains;
+    } else {
+        const preset = EQ_PRESETS[presetName];
+        if (!preset) return;
+        gains = preset.gains;
+    }
+    EQ_BANDS.forEach((band, idx) => {
+        const slider = document.querySelector(`input[data-freq="${band.freq}"]`);
+        if (slider && gains[idx] !== undefined) {
+            slider.value = gains[idx];
+            updateEQValue(slider);
+        }
+    });
+    // Save last preset
+    localStorage.setItem(LAST_PRESET_KEY, presetName);
+}
+
+function updatePresetSelector() {
+    const selector = document.querySelector('select[onchange^="applyEQPreset"]');
+    if (!selector) return;
+    // Keep default presets
+    const defaultOptions = Object.entries(EQ_PRESETS).map(([key, val]) => 
+        `<option value="${key}">${val.name}</option>`
+    ).join('');
+    // Add custom presets
+    const customPresets = loadCustomPresets();
+    const customOptions = Object.values(customPresets).map(p => 
+        `<option value="custom_${p.name}">${p.name} (Custom)</option>`
+    ).join('');
+    selector.innerHTML = defaultOptions + customOptions;
+}
+
 let denoiseStrength = 0.5;
 let eqValues = {};
 
@@ -32,6 +97,16 @@ let eqValues = {};
 document.addEventListener('DOMContentLoaded', () => {
     console.log('[Premium] Features loaded');
     initEQSliders();
+    updatePresetSelector(); // Load custom presets
+    // Restore last used preset
+    const lastPreset = localStorage.getItem(LAST_PRESET_KEY);
+    if (lastPreset) {
+        const selector = document.getElementById('eqPresetSelector');
+        if (selector) {
+            selector.value = lastPreset;
+            applyEQPreset(lastPreset);
+        }
+    }
     // Check if job already loaded (e.g. page refresh)
     if (window.currentJobId) showPremiumFeatures();
 });
@@ -274,18 +349,7 @@ function resetEQ() {
     });
 }
 
-function applyEQPreset(presetName) {
-    const preset = EQ_PRESETS[presetName];
-    if (!preset) return;
-    EQ_BANDS.forEach((band, idx) => {
-        const slider = document.querySelector(`input[data-freq="${band.freq}"]`);
-        if (slider) {
-            slider.value = preset.gains[idx];
-            updateEQValue(slider);
-        }
-    });
-    alert(`EQ Preset: ${preset.name}`);
-}
+// applyEQPreset is defined earlier with custom preset support
 
 function applyEQ(jobId) {
     if (!jobId) {
