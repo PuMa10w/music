@@ -17,6 +17,7 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [batchProgress, setBatchProgress] = useState<{ current: number, total: number } | null>(null)
   const [bpmKey, setBpmKey] = useState<{ bpm: number, key: string } | null>(null)
+  const [masterLufs, setMasterLufs] = useState<number>(-14.0)
 
   // Определяем тип первого файла для превью
   const firstFile = files.length > 0 ? files[0] : null
@@ -90,7 +91,7 @@ function App() {
   const handleMaster = async (jobId: string, stem: string = 'instrumental') => {
     try {
       setError(null)
-      const data = await masterTrack(jobId, stem)
+      const data = await masterTrack(jobId, stem, masterLufs)
       if (data.success) {
         alert('Mastering done! Check ' + data.file)
       }
@@ -98,6 +99,12 @@ function App() {
       setError(e.message || 'Mastering failed')
     }
   }
+
+  const masteringPresets = [
+    { name: 'Spotify', lufs: -14.0 },
+    { name: 'YouTube', lufs: -13.0 },
+    { name: 'CD', lufs: -10.0 },
+  ]
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black p-8">
@@ -207,12 +214,31 @@ function App() {
                   >
                     Анализировать (BPM/Key)
                   </button>
+                  <div className="flex items-center gap-2 mt-4">
                   <button
                     onClick={() => handleMaster(jobResult.jobId, 'instrumental')}
-                    className="mt-4 ml-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition text-sm"
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition text-sm"
                   >
                     🎛️ Master
                   </button>
+                  
+                  <div className="flex gap-1">
+                    {masteringPresets.map(preset => (
+                      <button
+                        key={preset.name}
+                        onClick={() => {
+                          setMasterLufs(preset.lufs)
+                          handleMaster(jobResult.jobId, 'instrumental')
+                        }}
+                        className={`px-3 py-1 text-xs rounded transition ${
+                          masterLufs === preset.lufs ? 'bg-pink-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                        }`}
+                      >
+                        {preset.name} ({preset.lufs} LUFS)
+                      </button>
+                    ))}
+                  </div>
+                  </div>
                   {bpmKey && (
                     <div className="mt-2 text-gray-300">
                       BPM: <span className="font-bold text-white">{bpmKey.bpm}</span> | 
