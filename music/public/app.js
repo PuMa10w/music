@@ -1,1747 +1,493 @@
-/**
- * Voice Remover Pro v5.0 — Ultimate Stem Separation
- * Main Application JavaScript
- */
-
-// ==================== API BASE URL WITH FALLBACK ====================
-let _apiBase = null;
-
-async function getAPI() {
-    if (_apiBase !== null) return _apiBase;
-    try {
-        // Try localhost:8000 first
-        const res = await fetch('http://localhost:8000/api/health', { method: 'HEAD', signal: AbortSignal.timeout(2000) });
-        if (res.ok || res.status < 500) {
-            _apiBase = 'http://localhost:8000';
-            return _apiBase;
-        }
-    } catch (e) {
-        // localhost not available, fall back to relative path
-    }
-    _apiBase = '';
-    return _apiBase;
-}
-
-// Synchronous getter for contexts where await is not possible (uses cached value)
-function api() {
-    return _apiBase !== null ? _apiBase : 'http://localhost:8000';
-}
-
-// ==================== STATE ====================
-
-// WebSocket progress connection
-let wsProgress = null;
-let wsCurrentJobId = null;
-
-/**
- * Инициализация WebSocket для прогресса
- */
-function initWebSocketProgress() {
-    if (wsProgress) return; // Уже инициализировано
-    
-    try {
-        wsProgress = createProgressWebSocket();
-        
-        // Слушаем прогресс
-        wsProgress.on('progress', (data) => {
-            console.log('[WS] Progress:', data.percent, data.message);
-            updateProgress(data.percent || 0, data.message || 'Обработка...');
-        });
-
-        wsProgress.on('complete', (data) => {
-            console.log('[WS] Complete:', data);
-            updateProgress(100, data.message || 'Готово!');
-            hideLoading();
-            toast('✓ Обработка завершена!', 'success');
-        });
-
-        wsProgress.on('error', (data) => {
-            console.error('[WS] Error:', data);
-            hideLoading();
-            $('progressContainer').classList.add('hidden');
-            toast('Ошибка: ' + (data.message || 'Неизвестная ошибка'), 'error');
-        });
-
-        wsProgress.on('start', (data) => {
-            console.log('[WS] Job started:', data);
-            $('progressContainer').classList.remove('hidden');
-            updateProgress(5, 'Запуск обработки...');
-        });
-
-        console.log('[WS] Progress WebSocket initialized');
-    } catch (e) {
-        console.warn('[WS] Failed to initialize WebSocket:', e.message);
-        // Fallback: без WebSocket прогресса
-        wsProgress = null;
-    }
-}
-let files = [];
-let currentIdx = 0;
-let currentJob = null;
-let mode = '2stem';
-let quality = 'quality';
-let preset = 'default';
-let selectedModel = 'modern_ensemble';
-let modelRegistry = {};
-let modelStatusRegistry = {};
-let stemsData = {};
-let session = {};
-let soloedStem = null;
-let stemStates = {};
-let eqStates = {};
-const EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
-
-// ==================== BATCH PROCESSING ====================
-let batchQueue = [];          // очередь заданий
-let batchProcessing = false;  // флаг обработки
-let batchPaused = false;      // флаг паузы
-let maxConcurrent = 2;        // макс одновременно
-let activeJobs = new Set();   // активные задачи
-
-// Статусы файлов в очереди
-const BATCH_STATUS = {
-    PENDING: 'pending',     // ожидает
-    PROCESSING: 'processing', // обрабатывается
-    COMPLETED: 'completed', // завершён
-    ERROR: 'error',         // ошибка
-    CANCELLED: 'cancelled'  // отменён
-};
-
-// ==================== DOM HELPERS ====================
-const $ = id => document.getElementById(id);
-
-// ==================== INITIALIZATION ====================
-document.addEventListener('DOMContentLoaded', () => {
-    getAPI(); // probe API base URL
-    initNavigation();
-    initKeyboard();
-    initDropZone();
-    initPresets();
-    loadSession();
-    loadHistory();
-    initMobileResponsive();
-    loadModelRegistry();
-    updateWorkspaceState();
-});
-
-function updateWorkspaceState(state = {}) {
-    const modeLabels = {
-        '2stem': '2 STEMS',
-        '4stem': '4 STEMS',
-        '6stem': '6 STEMS'
-    };
-
-    const activeFile = files[currentIdx];
-    const statusText = state.status || (activeFile ? 'Файл готов' : 'Ожидание');
-    const heroText = activeFile
-        ? `Активный файл: ${activeFile.filename}. Выберите режим, настройте силу разделения и запустите обработку.`
-        : 'Сейчас в сессии нет активного файла. Перетащите трек в левую панель или откройте YouTube-вкладку для импорта аудио.';
-
-    if ($('statusFileCount')) $('statusFileCount').textContent = String(files.length);
-    if ($('statusMode')) $('statusMode').textContent = modeLabels[mode] || mode.toUpperCase();
-    if ($('statusPreset')) $('statusPreset').textContent = (preset || 'default').toUpperCase();
-    if ($('statusState')) $('statusState').textContent = statusText;
-    if ($('heroStateText')) $('heroStateText').textContent = heroText;
-    if ($('heroStateCard')) $('heroStateCard').classList.toggle('hidden', Boolean(activeFile));
-
-    if ($('resultSummary2Mode')) $('resultSummary2Mode').textContent = modeLabels[mode] || mode.toUpperCase();
-    if ($('resultSummary2Preset')) $('resultSummary2Preset').textContent = (preset || 'default').toUpperCase();
-    if ($('resultSummaryMultiMode')) $('resultSummaryMultiMode').textContent = modeLabels[mode] || mode.toUpperCase();
-    if ($('resultSummaryMultiPreset')) $('resultSummaryMultiPreset').textContent = (preset || 'default').toUpperCase();
-
-    const activeModel = modelRegistry[selectedModel];
-    const runtimeStatus = modelStatusRegistry[selectedModel];
-    if ($('activeModelName')) $('activeModelName').textContent = activeModel?.name || 'Model not loaded';
-    if ($('activeModelBadge')) $('activeModelBadge').textContent = activeModel?.badge || 'Unknown';
-    if ($('activeModelDescription')) $('activeModelDescription').textContent = activeModel?.description || 'Список моделей ещё загружается.';
-    if ($('activeModelFamily')) $('activeModelFamily').textContent = activeModel?.family || 'Unknown';
-    if ($('activeModelBackend')) $('activeModelBackend').textContent = `backend: ${runtimeStatus?.backend || activeModel?.backend || 'unknown'}`;
-    if ($('activeModelState')) $('activeModelState').textContent = runtimeStatus?.available === false ? 'limited' : 'ready';
-}
-
-async function loadModelRegistry() {
-    try {
-        const [modelsRes, statusRes] = await Promise.all([
-            fetch(`${api()}/api/models`),
-            fetch(`${api()}/api/models/status`)
-        ]);
-
-        modelRegistry = modelsRes.ok ? await modelsRes.json() : {};
-        const statusJson = statusRes.ok ? await statusRes.json() : {};
-        modelStatusRegistry = statusJson.models || {};
-        populateModelSelect();
-        updateWorkspaceState();
-    } catch (e) {
-        console.warn('Model registry load failed:', e.message);
-    }
-}
-
-function populateModelSelect() {
-    const select = $('modelSelect');
-    if (!select) return;
-    const compareA = $('compareModelA');
-    const compareB = $('compareModelB');
-
-    const preferredOrder = ['modern_ensemble', 'demucs', 'htdemucs_ft', 'mdxnet', 'bandit', 'melband', 'scnet', 'vrnet', 'openunmix', 'asteroid', 'spleeter', 'ensemble', 'uvr5_mdx', 'uvr5_vr', 'lalal', 'legacy'];
-    const entries = preferredOrder.filter(key => modelRegistry[key]).map(key => [key, modelRegistry[key]]);
-
-    select.innerHTML = entries.map(([key, model]) => {
-        const status = modelStatusRegistry[key];
-        const suffix = status?.available === false ? ' • limited' : ' • local';
-        return `<option value="${key}" ${key === selectedModel ? 'selected' : ''}>${model.name}${suffix}</option>`;
-    }).join('');
-
-    if (!modelRegistry[selectedModel] && entries.length) {
-        selectedModel = entries[0][0];
-        select.value = selectedModel;
-    }
-
-    const compareOptions = entries.map(([key, model]) => `<option value="${key}">${model.name}</option>`).join('');
-    if (compareA) compareA.innerHTML = compareOptions;
-    if (compareB) compareB.innerHTML = compareOptions;
-    if (compareA && !compareA.value) compareA.value = 'modern_ensemble';
-    if (compareB && !compareB.value) compareB.value = 'demucs';
-}
-
-function updateResultSummary(type, details = {}) {
-    const targets = {
-        2: {
-            mode: $('resultSummary2Mode'),
-            preset: $('resultSummary2Preset'),
-            count: $('resultSummary2Count'),
-            status: $('resultSummary2Status')
-        },
-        multi: {
-            mode: $('resultSummaryMultiMode'),
-            preset: $('resultSummaryMultiPreset'),
-            count: $('resultSummaryMultiCount'),
-            status: $('resultSummaryMultiStatus')
-        }
-    };
-
-    const modeLabels = {
-        '2stem': '2 STEMS',
-        '4stem': '4 STEMS',
-        '6stem': '6 STEMS'
-    };
-
-    const bucket = targets[type];
-    if (!bucket) return;
-
-    if (bucket.mode) bucket.mode.textContent = details.modeLabel || modeLabels[mode] || mode.toUpperCase();
-    if (bucket.preset) bucket.preset.textContent = details.presetLabel || (preset || 'default').toUpperCase();
-    if (bucket.count) bucket.count.textContent = String(details.count ?? 0);
-    if (bucket.status) bucket.status.textContent = details.status || 'Готово';
-
-    if (type === 2 && $('resultBackendTrace')) {
-        const backend = details.runtimeBackend || modelStatusRegistry[selectedModel]?.backend || modelRegistry[selectedModel]?.backend || 'unknown';
-        const requested = details.modelRequested || selectedModel;
-        const used = details.modelUsed || selectedModel;
-        $('resultBackendTrace').textContent = `requested: ${requested} / used: ${used} / backend: ${backend}`;
-    }
-}
-
-// ==================== MOBILE RESPONSIVE ====================
-function initMobileResponsive() {
-    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
-    const appNav = document.getElementById('appNav');
-    
-    // Show/hide hamburger menu based on screen width
-    function updateMobileMenuVisibility() {
-        if (window.innerWidth <= 768) {
-            // Mobile: show hamburger, hide nav items
-            if (mobileMenuBtn) mobileMenuBtn.classList.remove('hidden');
-            if (appNav) appNav.style.display = 'none';
-        } else {
-            // Desktop: hide hamburger, show nav
-            if (mobileMenuBtn) mobileMenuBtn.classList.add('hidden');
-            if (appNav) appNav.style.display = 'flex';
-        }
-    }
-    
-    // Initial check
-    updateMobileMenuVisibility();
-    
-    // Listen to window resize
-    window.addEventListener('resize', updateMobileMenuVisibility);
-    
-    // Prevent body scroll when mobile menu is open
-    const overlay = document.getElementById('mobileMenuOverlay');
-    if (overlay) {
-        overlay.addEventListener('click', toggleMobileMenu);
-    }
-}
-
-function toggleMobileMenu() {
-    const overlay = document.getElementById('mobileMenuOverlay');
-    const appNav = document.getElementById('appNav');
-    
-    if (!overlay || !appNav) return;
-    
-    const isHidden = overlay.classList.contains('hidden');
-    
-    if (isHidden) {
-        // Open menu
-        overlay.classList.remove('hidden');
-        appNav.classList.remove('hidden');
-        appNav.style.display = 'flex';
-        appNav.style.position = 'fixed';
-        appNav.style.top = '120px';
-        appNav.style.left = '0';
-        appNav.style.right = '0';
-        appNav.style.zIndex = '1000';
-        appNav.style.flexDirection = 'column';
-        appNav.style.gap = '4px';
-        appNav.style.margin = '0';
-        appNav.style.padding = '8px';
-        appNav.style.background = 'var(--bg-card)';
-        appNav.style.borderBottom = '1px solid var(--border-subtle)';
-        appNav.style.borderRadius = '0';
-        document.body.style.overflow = 'hidden';
-    } else {
-        // Close menu
-        overlay.classList.add('hidden');
-        appNav.classList.add('hidden');
-        appNav.style.position = 'relative';
-        appNav.style.top = 'auto';
-        appNav.style.left = 'auto';
-        appNav.style.right = 'auto';
-        appNav.style.zIndex = 'auto';
-        appNav.style.flexDirection = 'row';
-        appNav.style.margin = '0';
-        appNav.style.padding = '10px';
-        appNav.style.background = 'transparent';
-        appNav.style.borderBottom = 'none';
-        appNav.style.display = 'flex';
-        document.body.style.overflow = 'auto';
-    }
-}
-
-
-
-// ==================== TOAST NOTIFICATIONS ====================
-function toast(msg, type = 'info') {
-    const icons = {
-        success: 'check-circle-fill',
-        error: 'exclamation-triangle-fill',
-        warning: 'exclamation-circle-fill',
-        info: 'info-circle-fill'
-    };
-    const t = document.createElement('div');
-    t.className = `toast ${type}`;
-    t.innerHTML = `<i class="bi bi-${icons[type]}"></i><span>${msg}</span>`;
-    $('toastContainer').appendChild(t);
-    setTimeout(() => {
-        t.style.opacity = '0';
-        t.style.transform = 'translateX(100%)';
-        t.style.transition = 'all 0.3s ease';
-        setTimeout(() => t.remove(), 300);
-    }, 4000);
-}
-
-// ==================== NAVIGATION ====================
-function initNavigation() {
-    document.querySelectorAll('.nav-btn').forEach(btn => {
-        btn.onclick = () => {
-            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            switchView(btn.dataset.view);
-            
-            // Close mobile menu after navigation (mobile only)
-            if (window.innerWidth <= 768) {
-                setTimeout(() => {
-                    const overlay = document.getElementById('mobileMenuOverlay');
-                    if (overlay && !overlay.classList.contains('hidden')) {
-                        toggleMobileMenu();
-                    }
-                }, 100);
-            }
-        };
-    });
-}
-
-function switchView(view) {
-    const ws = $('workspaceView');
-    const lib = $('libraryView');
-    const yt = $('youtubeView');
-    const hist = $('historyView');
-    if (ws) ws.classList.toggle('hidden', view !== 'workspace');
-    if (lib) lib.classList.toggle('hidden', view !== 'library');
-    if (yt) yt.classList.toggle('hidden', view !== 'youtube');
-    if (hist) hist.classList.toggle('hidden', view !== 'history');
-    if (view === 'history') loadHistory();
-    if (view === 'library' && lib) loadLibrary();
-    updateWorkspaceState();
-}
-
-// ==================== KEYBOARD SHORTCUTS ====================
-function initKeyboard() {
-    document.addEventListener('keydown', e => {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-        switch(e.key.toLowerCase()) {
-            case ' ':
-                e.preventDefault();
-                togglePlayPause();
-                break;
-            case 's':
-                if (!e.ctrlKey && !e.metaKey) processCurrent();
-                break;
-            case 'r':
-                resetApp();
-                break;
-            case 'o':
-                if (e.ctrlKey || e.metaKey) {
-                    e.preventDefault();
-                    $('fileInput').click();
-                }
-                break;
-            case 'escape':
-                resetApp();
-                break;
+     1|     1|/**
+     2|     2| * Voice Remover Pro v5.0 — Ultimate Stem Separation
+     3|     3| * Main Application JavaScript
+     4|     4| */
+     5|     5|
+     6|     6|// ==================== UTILITY FUNCTIONS ====================
+     7|     7|
+     8|     8|/**
+     9|     9| * Escape HTML special characters to prevent XSS
+    10|    10| * @param {string} unsafe - string to escape
+    11|    11| * @returns {string} escaped string
+    12|    12| */
+    13|    13|function escapeHtml(unsafe) {
+    if (typeof unsafe !== 'string') return unsafe;
+    return unsafe.replace(/[&<>"']/g, m => {
+        switch (m) {
+            case '&': return '&amp;';
+            case '<': return '&lt;';
+            case '>': return '&gt;';
+            case '"': return '&quot;';
+            case "'": return '&#39;';
+            default: return m;
         }
     });
-}
-
-function togglePlayPause() {
-    const audio = $('previewAudio');
-    if (audio?.src) {
-        audio.paused ? audio.play() : audio.pause();
-        updatePlayBtn(!audio.paused);
-    }
-}
-
-function updatePlayBtn(playing) {
-    const btn = $('playBtn');
-    if (btn) {
-        btn.innerHTML = playing ? '<i class="bi bi-pause-fill"></i>' : '<i class="bi bi-play-fill"></i>';
-    }
-}
-
-function skipAudio(seconds) {
-    const audio = $('previewAudio');
-    if (audio?.src) {
-        audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + seconds));
-    }
-}
-
-// ==================== DRAG & DROP ====================
-function initDropZone() {
-    const dz = $('dropZone');
-    const fi = $('fileInput');
-
-    dz.onclick = () => fi.click();
-
-    dz.ondragover = e => {
-        e.preventDefault();
-        dz.classList.add('dragover');
-    };
-
-    dz.ondragleave = () => dz.classList.remove('dragover');
-
-    dz.ondrop = e => {
-        e.preventDefault();
-        dz.classList.remove('dragover');
-        if (e.dataTransfer.files.length) handleFiles([...e.dataTransfer.files]);
-    };
-
-    fi.onchange = e => {
-        if (e.target.files.length) handleFiles([...e.target.files]);
-    };
-}
-
-// ==================== FILE HANDLING ====================
-async function handleFiles(fileArr) {
-    for (const file of fileArr) {
-        const ext = file.name.split('.').pop().toLowerCase();
-        const allowed = ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'mp4', 'aac', 'aiff', 'wma', 'opus'];
-        if (!allowed.includes(ext)) {
-            toast(`${file.name} — неподдерживаемый формат`, 'error');
-            continue;
-        }
-
-        const fd = new FormData();
-        fd.append('audio', file);
-
-        try {
-            showLoading('ЗАГРУЗКА ФАЙЛА...');
-            const res = await fetch(`${api()}/api/upload`, { method: 'POST', body: fd });
-            const data = await res.json();
-            hideLoading();
-            if (data.error) { toast(data.error, 'error'); continue; }
-            files.push({ ...data, file });
-            toast(`✓ ${file.name}`, 'success');
-        } catch (e) {
-            hideLoading();
-            toast(`Ошибка загрузки: ${file.name}`, 'error');
-        }
-    }
-    updateList();
-    saveSession();
-}
-
-function updateList() {
-    const section = $('fileListSection');
-    const list = $('fileList');
-
-    if (!files.length) {
-        section.classList.add('hidden');
-        $('dropText').textContent = 'Перетащите файлы сюда';
-        $('dropZone').classList.remove('has-file');
-        currentJob = null;
-        $('audioPreview').classList.add('hidden');
-        updateWorkspaceState({ status: 'Ожидание' });
-        return;
-    }
-
-    if (currentIdx >= files.length) {
-        currentIdx = Math.max(0, files.length - 1);
-    }
-
-    section.classList.remove('hidden');
-    $('dropText').textContent = `${files.length} файл(ов) загружено`;
-    $('dropZone').classList.add('has-file');
-
-    list.innerHTML = files.map((f, i) => `
-        <div class="file-item ${i === currentIdx ? 'active' : ''}" onclick="selectFile(${i})">
-            <div class="file-item-icon"><i class="bi bi-music-note-beamed"></i></div>
-            <div class="file-item-info">
-                <div class="file-item-name">${f.filename}</div>
-                <div class="file-item-meta">
-                    ${f.info ? `${fmtDur(f.info.duration)} • ${fmtSize(f.info.size)} • ${f.info.codec}` : fmtSize(f.size)}
-                </div>
-            </div>
-            <button class="btn-icon" onclick="event.stopPropagation(); removeFile(${i})" title="Удалить">
-                <i class="bi bi-x-lg"></i>
-            </button>
-        </div>
-    `).join('');
-
-    currentJob = files[currentIdx]?.jobId || null;
-    updateWorkspaceState({ status: currentJob ? 'Файл готов' : 'Ожидание' });
-
-    if (currentJob) {
-        loadPreview(currentJob);
-    }
-}
-
-function selectFile(i) {
-    currentIdx = i;
-    currentJob = files[i]?.jobId;
-    document.querySelectorAll('.file-item').forEach((item, idx) => {
-        item.classList.toggle('active', idx === i);
-    });
-    loadPreview(currentJob);
-    updateWorkspaceState({ status: currentJob ? 'Файл готов' : 'Ожидание' });
-    
-    // Инициализировать WebSocket для прогресса
-    initWebSocketProgress();
-}
-
-function removeFile(i) {
-    files.splice(i, 1);
-    if (currentIdx >= files.length) currentIdx = Math.max(0, files.length - 1);
-    updateList();
-    saveSession();
-}
-
-function clearFiles() {
-    files = [];
-    currentIdx = 0;
-    currentJob = null;
-    updateList();
-    toast('Список очищен', 'info');
-    saveSession();
-}
-
-// ==================== PREVIEW & WAVEFORM ====================
-async function loadPreview(jobId) {
-    if (!jobId) return;
-    try {
-        const res = await fetch(`${api()}/api/preview/${jobId}`);
-        const d = await res.json();
-        if (d.error) return;
-
-        $('previewName').textContent = d.filename;
-        $('previewBadges').innerHTML = d.info ? `
-            <span class="badge text-bg-secondary">${d.info.codec}</span>
-            <span class="badge text-bg-info">${fmtDur(d.info.duration)}</span>
-        ` : '';
-        $('previewAudio').src = `${api()}${d.url}`;
-        $('audioPreview').classList.remove('hidden');
-        updateWorkspaceState({ status: 'Превью загружено' });
-
-        const audio = $('previewAudio');
-        audio.ontimeupdate = () => {
-            $('currentTime').textContent = fmtDur(Math.floor(audio.currentTime || 0));
-            $('totalTime').textContent = fmtDur(Math.floor(audio.duration || 0));
-        };
-        audio.onplay = () => updatePlayBtn(true);
-        audio.onpause = () => updatePlayBtn(false);
-
-        loadWaveform(jobId);
-    } catch (e) { }
-}
-
-async function loadWaveform(jobId) {
-    const canvas = $('waveformCanvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = canvas.offsetWidth * (window.devicePixelRatio || 1);
-    canvas.height = 120 * (window.devicePixelRatio || 1);
-    ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
-
-    try {
-        const res = await fetch(`${api()}/api/waveform/${jobId}`);
-        const d = await res.json();
-        if (d.waveform?.length) drawWave(ctx, d.waveform, canvas.width / (window.devicePixelRatio || 1), 120);
-        else drawFakeWave(ctx, canvas.width / (window.devicePixelRatio || 1), 120);
-    } catch (e) {
-        drawFakeWave(ctx, canvas.width / (window.devicePixelRatio || 1), 120);
-    }
-}
-
-function drawWave(ctx, data, w, h) {
-    ctx.clearRect(0, 0, w, h);
-
-    // Background grid
-    ctx.strokeStyle = 'rgba(108, 92, 231, 0.1)';
-    ctx.lineWidth = 0.5;
-    for (let y = 0; y < h; y += 20) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
-        ctx.stroke();
-    }
-
-    // Waveform gradient
-    const grad = ctx.createLinearGradient(0, 0, w, 0);
-    grad.addColorStop(0, '#ff6b9d');
-    grad.addColorStop(0.5, '#6c5ce7');
-    grad.addColorStop(1, '#4ecdc4');
-
-    ctx.fillStyle = grad;
-    const bw = w / data.length;
-    data.forEach((v, i) => {
-        const bh = Math.max(v * h * 0.8, 2);
-        ctx.fillRect(i * bw, (h - bh) / 2, bw - 1, bh);
-    });
-
-    // Center line
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, h / 2);
-    ctx.lineTo(w, h / 2);
-    ctx.stroke();
-}
-
-function drawFakeWave(ctx, w, h) {
-    ctx.clearRect(0, 0, w, h);
-    const data = Array(200).fill(0).map(() => Math.random() * 0.4 + 0.1);
-    drawWave(ctx, data, w, h);
-}
-
-// ==================== MODE & QUALITY ====================
-function setMode(m) {
-    mode = m;
-    document.querySelectorAll('.mode-option').forEach(c => c.classList.remove('active'));
-    document.querySelector(`.mode-option[data-mode="${m}"]`).classList.add('active');
-
-    const btnTexts = {
-        '2stem': 'ЗАПУСТИТЬ 2-STEM',
-        '4stem': 'ЗАПУСТИТЬ 4-STEM',
-        '6stem': 'ЗАПУСТИТЬ 6-STEM'
-    };
-    $('processBtnText').textContent = btnTexts[m];
-    updateWorkspaceState();
-}
-
-function setQuality(q) {
-    quality = q;
-    document.querySelectorAll('.quality-btn').forEach(b => b.classList.remove('active'));
-    document.querySelector(`.quality-btn[data-quality="${q}"]`).classList.add('active');
-}
-
-function setModel(modelName) {
-    selectedModel = modelName || 'modern_ensemble';
-    updateWorkspaceState();
-}
-
-function initPresets() {
-    document.querySelectorAll('.preset-btn').forEach(btn => {
-        btn.onclick = () => {
-            document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            preset = btn.dataset.preset;
-            updateWorkspaceState();
-        };
-    });
-}
-
-// ==================== PROCESSING ====================
-async function processCurrent() {
-    if (!currentJob) { toast('Выберите файл для обработки', 'warning'); return; }
-
-    const strength = $('vocalStrength').value / 100;
-
-    if (mode === 'analyze') {
-        await runAnalysis();
-        return;
-    }
-
-    showLoading('ОБРАБОТКА...');
-    updateWorkspaceState({ status: 'Обработка...' });
-    $('progressContainer').classList.remove('hidden');
-    $('resultContainer2').classList.add('hidden');
-    $('resultContainerMulti').classList.add('hidden');
-    $('resetSection').classList.add('hidden');
-
-    try {
-        if (mode === '2stem') await process2stem(strength);
-        else if (mode === '4stem') await process4stem(strength);
-        else if (mode === '6stem') await process6stem(strength);
-    } catch (e) {
-        hideLoading();
-        toast('Ошибка: ' + e.message, 'error');
-        $('progressContainer').classList.add('hidden');
-        updateWorkspaceState({ status: 'Ошибка' });
-    }
-}
-
-// ==================== BATCH PROCESSING ====================
-/**
- * Запустить обработку всех файлов (Batch mode)
- */
-async function processAllFiles() {
-    if (!files.length) {
-        toast('Загрузите файлы для обработки', 'warning');
-        return;
-    }
-
-    // Создать очередь
-    batchQueue = files.map((f, idx) => ({
-        idx,
-        file: f,
-        status: BATCH_STATUS.PENDING,
-        progress: 0,
-        error: null
-    }));
-
-    batchProcessing = true;
-    batchPaused = false;
-    activeJobs.clear();
-
-    showBatchUI();
-    updateBatchQueue();
-
-    // Запустить воркеры обработки
-    processBatchWorker();
-}
-
-/**
- * Обработчик очереди (максимум maxConcurrent одновременно)
- */
-async function processBatchWorker() {
-    while (batchProcessing && batchQueue.length > 0) {
-        // Ждём если на паузе
-        while (batchPaused && batchProcessing) {
-            await sleep(500);
-        }
-
-        // Получить следующую задачу
-        const job = batchQueue.find(j => j.status === BATCH_STATUS.PENDING);
-        if (!job || activeJobs.size >= maxConcurrent) {
-            await sleep(1000);
-            continue;
-        }
-
-        activeJobs.add(job.idx);
-        job.status = BATCH_STATUS.PROCESSING;
-        updateBatchQueue();
-
-        try {
-            await processBatchJob(job);
-            job.status = BATCH_STATUS.COMPLETED;
-            job.progress = 100;
-            toast(`✓ ${job.file.filename}`, 'success');
-        } catch (error) {
-            job.status = BATCH_STATUS.ERROR;
-            job.error = error.message;
-            toast(`✗ ${job.file.filename}: ${error.message}`, 'error');
-        } finally {
-            activeJobs.delete(job.idx);
-            updateBatchQueue();
-
-            // Проверить окончание всей обработки
-            if (batchQueue.every(j => j.status !== BATCH_STATUS.PENDING)) {
-                completeBatchProcessing();
-            }
-        }
-    }
-}
-
-/**
- * Обработать одно задание в очереди
- */
-async function processBatchJob(job) {
-    const strength = $('vocalStrength').value / 100;
-    const currentMode = mode;
-    const currentQuality = quality;
-    const currentPreset = preset;
-    const currentModel = $('modelSelect')?.value || 'default';
-
-    const jobId = job.file.jobId;
-    if (!jobId) throw new Error('Invalid jobId');
-
-    let res;
-    let data;
-
-    if (currentMode === '2stem') {
-        res = await fetch(`${api()}/api/separate/${jobId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vocalStrength: strength, preset: currentPreset, mode: currentQuality, model: currentModel })
-        });
-    } else if (currentMode === '4stem') {
-        res = await fetch(`${api()}/api/stems/${jobId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ strength, preset: currentPreset, mode: currentQuality, model: currentModel })
-        });
-    } else if (currentMode === '6stem') {
-        res = await fetch(`${api()}/api/stems6/${jobId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ strength, preset: currentPreset, mode: currentQuality, model: currentModel })
-        });
-    }
-
-    if (!res.ok) {
-        data = await res.json();
-        throw new Error(data.error || 'Processing failed');
-    }
-
-    data = await res.json();
-    job.progress = 100;
-    job.results = data; // Сохранить результаты
-}
-
-/**
- * Завершить batch обработку
- */
-function completeBatchProcessing() {
-    batchProcessing = false;
-    
-    const completed = batchQueue.filter(j => j.status === BATCH_STATUS.COMPLETED).length;
-    const failed = batchQueue.filter(j => j.status === BATCH_STATUS.ERROR).length;
-    
-    toast(`Обработка завершена: ${completed} успешно, ${failed} ошибок`, completed > failed ? 'success' : 'warning');
-    
-    // Показать итоговый отчёт
-    setTimeout(() => {
-        showBatchResults();
-    }, 1000);
-}
-
-/**
- * Показать UI батч обработки
- */
-function showBatchUI() {
-    // Скрыть обычный UI
-    $('progressContainer')?.classList.remove('hidden');
-    $('resultContainer2')?.classList.add('hidden');
-    $('resultContainerMulti')?.classList.add('hidden');
-    
-    // Показать батч очередь
-    let batchUI = $('batchQueueUI');
-    if (!batchUI) {
-        batchUI = document.createElement('div');
-        batchUI.id = 'batchQueueUI';
-        batchUI.className = 'card batch-queue-card';
-        $('progressContainer')?.parentElement?.insertBefore(batchUI, $('progressContainer')?.nextElementSibling);
-    }
-    batchUI.classList.remove('hidden');
-}
-
-/**
- * Обновить визуализацию очереди
- */
-function updateBatchQueue() {
-    let batchUI = $('batchQueueUI');
-    if (!batchUI) return;
-
-    const stats = {
-        pending: batchQueue.filter(j => j.status === BATCH_STATUS.PENDING).length,
-        processing: batchQueue.filter(j => j.status === BATCH_STATUS.PROCESSING).length,
-        completed: batchQueue.filter(j => j.status === BATCH_STATUS.COMPLETED).length,
-        error: batchQueue.filter(j => j.status === BATCH_STATUS.ERROR).length
-    };
-
-    const total = batchQueue.length;
-    const done = stats.completed + stats.error;
-    const progress = total > 0 ? Math.round((done / total) * 100) : 0;
-
-    batchUI.innerHTML = `
-        <div class="card-header">
-            <i class="bi bi-arrow-repeat"></i>
-            <h3>БАТЧ ОБРАБОТКА (${progress}%)</h3>
-            <div style="margin-left:auto; font-size:0.7rem; color:var(--text-muted)">
-                ${stats.processing} обработ. | ${stats.completed} готово | ${stats.error} ошибок
-            </div>
-        </div>
-        <div class="card-body">
-            <div class="ah-progress" style="margin-bottom:20px">
-                <div class="ah-progress-bar" style="width:${progress}%"></div>
-            </div>
-            <div class="batch-queue-list">
-                ${batchQueue.map((job, i) => `
-                    <div class="batch-queue-item status-${job.status}">
-                        <div class="batch-item-icon">
-                            ${job.status === BATCH_STATUS.PENDING ? '<i class="bi bi-hourglass"></i>' : ''}
-                            ${job.status === BATCH_STATUS.PROCESSING ? '<i class="bi bi-arrow-repeat" style="animation:spin 1s linear infinite;"></i>' : ''}
-                            ${job.status === BATCH_STATUS.COMPLETED ? '<i class="bi bi-check-circle-fill" style="color:var(--accent-success)"></i>' : ''}
-                            ${job.status === BATCH_STATUS.ERROR ? '<i class="bi bi-x-circle-fill" style="color:var(--accent-danger)"></i>' : ''}
-                        </div>
-                        <div class="batch-item-info">
-                            <div class="batch-item-name">${job.file.filename}</div>
-                            <div class="batch-item-meta">${job.status === BATCH_STATUS.ERROR ? job.error : job.progress}%</div>
-                        </div>
-                        ${job.status === BATCH_STATUS.PROCESSING ? `
-                            <div class="batch-item-progress">
-                                <div style="width:${job.progress}%; height:100%; background:var(--gradient-primary); border-radius:2px;"></div>
-                            </div>
-                        ` : ''}
-                    </div>
-                `).join('')}
-            </div>
-            <div class="batch-queue-controls" style="margin-top:16px; display:flex; gap:8px">
-                <button class="reset-btn" onclick="pauseResumeBatch()" style="flex:1">
-                    <i class="bi ${batchPaused ? 'bi-play-fill' : 'bi-pause-fill'}"></i>
-                    ${batchPaused ? 'Возобновить' : 'Пауза'}
-                </button>
-                <button class="btn-danger" onclick="cancelBatch()" style="flex:1">
-                    <i class="bi bi-stop-circle"></i>
-                    Отмена
-                </button>
-            </div>
-        </div>
-    `;
-
-    // Добавить стили для animation
-    if (!document.getElementById('batchQueueStyles')) {
-        const style = document.createElement('style');
-        style.id = 'batchQueueStyles';
-        style.textContent = `
-            @keyframes spin {
-                from { transform: rotate(0deg); }
-                to { transform: rotate(360deg); }
-            }
-            .batch-queue-item {
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                padding: 12px;
-                background: var(--bg-glass);
-                border: 1px solid var(--border-subtle);
-                border-radius: var(--radius-sm);
-                margin-bottom: 8px;
-                position: relative;
-            }
-            .batch-item-icon {
-                width: 32px;
-                height: 32px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 1.2rem;
-                color: var(--accent-primary);
-                flex-shrink: 0;
-            }
-            .batch-item-info {
-                flex: 1;
-                min-width: 0;
-            }
-            .batch-item-name {
-                font-weight: 600;
-                font-size: 0.85rem;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-            }
-            .batch-item-meta {
-                font-size: 0.7rem;
-                color: var(--text-muted);
-            }
-            .batch-item-progress {
-                width: 100px;
-                height: 4px;
-                background: var(--bg-card);
-                border-radius: 2px;
-                overflow: hidden;
-                flex-shrink: 0;
-            }
-            .status-error .batch-item-name {
-                color: var(--accent-danger);
-            }
-            .status-completed .batch-item-name {
-                color: var(--accent-success);
-            }
-        `;
-        document.head.appendChild(style);
-    }
-}
-
-/**
- * Пауза/возобновление батч обработки
- */
-function pauseResumeBatch() {
-    batchPaused = !batchPaused;
-    toast(batchPaused ? 'Пауза' : 'Возобновлено', 'info');
-    updateBatchQueue();
-    if (!batchPaused) processBatchWorker(); // Продолжить обработку
-}
-
-/**
- * Отмена батч обработки
- */
-function cancelBatch() {
-    if (!confirm('Отменить всю батч обработку?')) return;
-    
-    batchProcessing = false;
-    batchQueue.forEach(j => {
-        if (j.status === BATCH_STATUS.PENDING || j.status === BATCH_STATUS.PROCESSING) {
-            j.status = BATCH_STATUS.CANCELLED;
-        }
-    });
-    
-    toast('Батч обработка отменена', 'warning');
-    updateBatchQueue();
-    
-    setTimeout(() => {
-        $('batchQueueUI')?.classList.add('hidden');
-        resetApp();
-    }, 1500);
-}
-
-/**
- * Показать результаты батч обработки
- */
-function showBatchResults() {
-    const completed = batchQueue.filter(j => j.status === BATCH_STATUS.COMPLETED);
-    
-    if (!completed.length) return;
-    
-    const html = `
-        <div class="card" style="margin-top:20px">
-            <div class="card-header">
-                <i class="bi bi-check-circle-fill" style="color:var(--accent-success)"></i>
-                <h3>БАТЧ ОБРАБОТКА ЗАВЕРШЕНА</h3>
-            </div>
-            <div class="card-body">
-                <p style="color:var(--text-secondary); margin-bottom:16px">
-                    Успешно обработано файлов: <strong>${completed.length}</strong> из <strong>${batchQueue.length}</strong>
-                </p>
-                <div style="max-height:300px; overflow-y:auto; margin-bottom:16px">
-                    ${completed.map(j => `
-                        <div style="padding:8px; background:var(--bg-glass); border-radius:var(--radius-sm); margin-bottom:8px">
-                            <div style="font-weight:600; font-size:0.85rem; margin-bottom:4px">${j.file.filename}</div>
-                            <button class="btn-export" onclick="alert('Загрузка результатов для: ${j.file.filename}')" style="width:100%; margin-bottom:4px">
-                                <i class="bi bi-download"></i> Загрузить ${mode.toUpperCase()}
-                            </button>
-                        </div>
-                    `).join('')}
-                </div>
-                <button class="reset-btn" onclick="downloadAllBatchResults()" style="width:100%">
-                    <i class="bi bi-download"></i> Загрузить все результаты (ZIP)
-                </button>
-            </div>
-        </div>
-    `;
-    
-    const container = document.createElement('div');
-    container.innerHTML = html;
-    $('progressContainer')?.parentElement?.appendChild(container);
-}
-
-/**
- * Загрузить все результаты в ZIP
- */
-function downloadAllBatchResults() {
-    toast('⏳ Подготовка архива...', 'info');
-    // TODO: реализовать создание ZIP архива с результатами
-    setTimeout(() => {
-        toast('✓ Архив готов к загрузке', 'success');
-    }, 2000);
-}
-
-async function process2stem(strength) {
-    updateProgress(5, 'ИНИЦИАЛИЗАЦИЯ...');
-    
-    // Подписка на WebSocket прогресс
-    if (wsProgress && currentJob) {
-        wsProgress.subscribe(currentJob);
-    }
-
-    await sleep(300);
-
-    updateProgress(30, 'РАЗДЕЛЕНИЕ ВОКАЛ / ИНСТРУМЕНТАЛ...');
-    const res = await fetch(`${api()}/api/separate/${currentJob}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vocalStrength: strength, preset, mode: quality, model: $('modelSelect')?.value || 'default' })
-    });
-
-    if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
-    const d = await res.json();
-
-    updateProgress(100, 'ГОТОВО!');
-    hideLoading();
-
-    setTimeout(() => {
-        $('progressContainer').classList.add('hidden');
-        $('resultContainer2').classList.remove('hidden');
-        $('resetSection').classList.remove('hidden');
-
-        $('vocalsAudio').src = `${api()}${d.vocals}`;
-        $('instrAudio').src = `${api()}${d.instrumental}`;
-        stemsData = { vocals: d.vocals, instrumental: d.instrumental };
-        updateResultSummary(2, {
-            count: 2,
-            status: 'Готово',
-            runtimeBackend: d.runtimeBackend,
-            modelRequested: d.modelRequested,
-            modelUsed: d.modelUsed
-        });
-
-        syncAudios(['vocalsAudio', 'instrAudio']);
-        initEQSliders('vocals');
-        initEQSliders('instrumental');
-        toast('✓ 2-STEM разделение завершено!', 'success');
-    }, 500);
-}
-
-async function compareModels() {
-    if (!currentJob) {
-        toast('Сначала выберите файл для сравнения моделей', 'warning');
-        return;
-    }
-
-    const primaryModel = $('compareModelA')?.value || 'modern_ensemble';
-    const secondaryModel = $('compareModelB')?.value || 'demucs';
-    const vocalStrength = $('vocalStrength').value / 100;
-
-    showLoading('СРАВНЕНИЕ МОДЕЛЕЙ...');
-    try {
-        const res = await fetch(`${api()}/api/compare/${currentJob}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                vocalStrength,
-                preset,
-                primaryModel,
-                secondaryModel
-            })
-        });
-
-        if (!res.ok) {
-            const d = await res.json();
-            throw new Error(d.error || 'Compare failed');
-        }
-
-        const d = await res.json();
-        $('compareContainer')?.classList.remove('hidden');
-
-        $('compareModelATitle').textContent = `${modelRegistry[primaryModel]?.name || primaryModel}`;
-        $('compareModelBTitle').textContent = `${modelRegistry[secondaryModel]?.name || secondaryModel}`;
-        $('compareModelABackend').textContent = d.a?.runtimeBackend || 'backend';
-        $('compareModelBBackend').textContent = d.b?.runtimeBackend || 'backend';
-        $('compareVocalsA').src = d.a?.vocals ? `${api()}${d.a.vocals}` : '';
-        $('compareInstrumentalA').src = d.a?.instrumental ? `${api()}${d.a.instrumental}` : '';
-        $('compareVocalsB').src = d.b?.vocals ? `${api()}${d.b.vocals}` : '';
-        $('compareInstrumentalB').src = d.b?.instrumental ? `${api()}${d.b.instrumental}` : '';
-        toast('✓ A/B сравнение готово', 'success');
-    } catch (e) {
-        toast('Ошибка сравнения: ' + e.message, 'error');
-    } finally {
-        hideLoading();
-    }
-}
-
-async function process4stem(strength) {
-    updateProgress(5, 'ИНИЦИАЛИЗАЦИЯ...');
-    
-    // Подписка на WebSocket прогресс
-    if (wsProgress && currentJob) {
-        wsProgress.subscribe(currentJob);
-    }
-
-    await sleep(300);
-
-    updateProgress(30, 'РАЗДЕЛЕНИЕ НА 4 СТЕМА...');
-    const res = await fetch(`${api()}/api/stems/${currentJob}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ strength, preset, mode: quality, model: $('modelSelect')?.value || 'default' })
-    });
-
-    if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
-    const d = await res.json();
-
-    updateProgress(100, 'ГОТОВО!');
-    hideLoading();
-    stemsData = d;
-
-    setTimeout(() => {
-        $('progressContainer').classList.add('hidden');
-        $('resultContainerMulti').classList.remove('hidden');
-        $('resetSection').classList.remove('hidden');
-        $('multiResultTitle').textContent = '4-STEM РАЗДЕЛЕНИЕ';
-        updateResultSummary('multi', { count: Object.keys(d).length, status: 'Готово' });
-        renderMultiStems(d, 4);
-        toast('✓ 4-STEM разделение завершено!', 'success');
-    }, 500);
-}
-
-async function process6stem(strength) {
-    updateProgress(5, 'ИНИЦИАЛИЗАЦИЯ...');
-    
-    // Подписка на WebSocket прогресс
-    if (wsProgress && currentJob) {
-        wsProgress.subscribe(currentJob);
-    }
-
-    await sleep(200);
-
-    updateProgress(20, 'РАЗДЕЛЕНИЕ НА 6 СТЕМОВ...');
-    const res = await fetch(`${api()}/api/stems6/${currentJob}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ strength, preset, mode: quality, model: $('modelSelect')?.value || 'default' })
-    });
-
-    if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
-    const d = await res.json();
-
-    updateProgress(100, 'ГОТОВО!');
-    hideLoading();
-    stemsData = d;
-
-    setTimeout(() => {
-        $('progressContainer').classList.add('hidden');
-        $('resultContainerMulti').classList.remove('hidden');
-        $('resetSection').classList.remove('hidden');
-        $('multiResultTitle').textContent = '6-STEM РАЗДЕЛЕНИЕ';
-        updateResultSummary('multi', { count: Object.keys(d).length, status: 'Готово' });
-        renderMultiStems(d, 6);
-        toast('✓ 6-STEM разделение завершено!', 'success');
-    }, 500);
-}
-
-// ==================== MULTI-STEM RENDERING ====================
-function renderMultiStems(stems, count) {
-    const config = {
-        vocals: { icon: 'mic-fill', name: 'ВОКАЛ', color: 'vocals', desc: 'Основной вокал' },
-        lead_vocals: { icon: 'mic-fill', name: 'LEAD ВОКАЛ', color: 'vocals', desc: 'Ведущий вокал' },
-        backing_vocals: { icon: 'people-fill', name: 'BACKING ВОКАЛ', color: 'backing', desc: 'Бэк-вокал' },
-        drums: { icon: 'disc', name: 'УДАРНЫЕ', color: 'drums', desc: 'Drums & Percussion' },
-        bass: { icon: 'soundwave', name: 'БАС', color: 'bass', desc: 'Bass Guitar' },
-        piano: { icon: 'piano', name: 'ПИАНО', color: 'piano', desc: 'Piano & Keys' },
-        other: { icon: 'music-note-beamed', name: 'ДРУГОЕ', color: 'other', desc: 'Остальные инструменты' }
-    };
-
-    $('stemsContainer').innerHTML = Object.entries(stems).map(([key, url]) => {
-        const c = config[key] || { icon: 'music-note', name: key.toUpperCase(), color: 'other', desc: '' };
-        return `
-        <div class="stem-card-mini ${c.color}" data-stem="${key}">
-            <div class="stem-card-mini-header">
-                <div class="stem-card-mini-icon"><i class="bi bi-${c.icon}"></i></div>
-                <div>
-                    <div class="stem-card-mini-title">${c.name}</div>
-                    <div style="font-size:0.7rem; color:var(--text-muted)">${c.desc}</div>
-                </div>
-            </div>
-            <audio id="stem_${key}" src="${api()}${url}" controls class="w-100 mb-2"></audio>
-            <div class="stem-card-mini-controls">
-                <div class="stem-card-mini-mixer">
-                    <div class="mixer-row">
-                        <i class="bi bi-volume-up" style="color:var(--text-muted); font-size:0.85rem; width:18px"></i>
-                        <input type="range" class="stem-slider" id="stemVol_${key}" min="0" max="100" value="80" oninput="updateStemMixer()">
-                    </div>
-                    <div class="mixer-row">
-                        <i class="bi bi-arrows" style="color:var(--text-muted); font-size:0.85rem; width:18px"></i>
-                        <input type="range" class="stem-slider" id="stemPan_${key}" min="-100" max="100" value="0" oninput="updateStemMixer()">
-                        <span style="font-size:0.65rem; color:var(--text-muted); font-family:var(--font-mono); width:18px; text-align:center">C</span>
-                    </div>
-                </div>
-                <div class="stem-card-mini-actions">
-                    <button class="stem-btn" onclick="soloStem('${key}')" title="Solo"><i class="bi bi-headphones"></i></button>
-                    <button class="stem-btn" onclick="muteStem('${key}')" title="Mute"><i class="bi bi-mute"></i></button>
-                    <button class="stem-btn export" onclick="exportAudio('${key}')" title="Экспорт"><i class="bi bi-download"></i></button>
-                </div>
-            </div>
-        </div>`;
-    }).join('');
-
-    // Mixer channels
-    $('mixerControls').innerHTML = Object.entries(stems).map(([key, url]) => {
-        const c = config[key] || { icon: 'music-note', name: key.toUpperCase(), color: 'other' };
-        return `
-        <div class="mixer-channel">
-            <div class="mixer-channel-label">
-                <i class="bi bi-${c.icon}" style="color:var(--accent-${c.color})"></i>
-                ${c.name}
-            </div>
-            <input type="range" class="stem-slider" id="mixVol_${key}" min="0" max="100" value="80" oninput="syncMixer('${key}')">
-        </div>`;
-    }).join('');
-
-    syncAudios(Object.keys(stems).map(k => `stem_${k}`));
-}
-
-function syncAudios(ids) {
-    const audios = ids.map(id => $(id)).filter(Boolean);
-    audios.forEach(a => {
-        a.onplay = () => {
-            if (a._isSyncing) return;
-            const t = a.currentTime;
-            a._isSyncing = true;
-            audios.forEach(o => {
-                if (o !== a) {
-                    o._isSyncing = true;
-                    o.currentTime = t;
-                    o.play().catch(() => {});
-                    setTimeout(() => { o._isSyncing = false; }, 50);
-                }
-            });
-            setTimeout(() => { a._isSyncing = false; }, 50);
-        };
-        a.onpause = () => audios.forEach(o => { if (o !== a) o.pause(); });
-    });
-}
-
-function soloStem(key) {
-    if (soloedStem === key) {
-        soloedStem = null;
-        Object.keys(stemsData).forEach(k => {
-            const audio = $(`stem_${k}`);
-            if (audio) audio.volume = ($(`stemVol_${k}`)?.value / 100 || 0.8);
-        });
-        toast('Все стемы включены', 'info');
-        return;
-    }
-    soloedStem = key;
-    Object.keys(stemsData).forEach(k => {
-        const audio = $(`stem_${k}`);
-        if (audio) audio.volume = k === key ? ($(`stemVol_${k}`)?.value / 100 || 0.8) : 0;
-    });
-    toast(`Solo: ${key}`, 'info');
-}
-
-function muteStem(key) {
-    const audio = $(`stem_${key}`);
-    if (!audio) return;
-    audio.volume = audio.volume > 0 ? 0 : ($(`stemVol_${key}`)?.value / 100 || 0.8);
-}
-
-function updateStemMixer() {
-    if (soloedStem) return;
-    Object.keys(stemsData).forEach(key => {
-        const audio = $(`stem_${key}`);
-        const vol = $(`stemVol_${key}`);
-        if (audio && vol) audio.volume = vol.value / 100;
-    });
-}
-
-function syncMixer(key) {
-    const volSlider = $(`mixVol_${key}`);
-    const stemVolSlider = $(`stemVol_${key}`);
-    if (volSlider && stemVolSlider) {
-        stemVolSlider.value = volSlider.value;
-        const audio = $(`stem_${key}`);
-        if (audio) audio.volume = volSlider.value / 100;
-    }
-}
-
-function updateBalance() {
-    const bal = $('balanceSlider').value;
-    $('balanceLabel').textContent = `${100 - bal} / ${bal}`;
-    const va = $('vocalsAudio'), ia = $('instrAudio');
-    if (va) va.volume = bal / 100;
-    if (ia) ia.volume = (100 - bal) / 100;
-}
-
-function updateMixer() {
-    const va = $('vocalsAudio'), ia = $('instrAudio');
-    const vv = $('vocalsVol')?.value / 100 || 1;
-    const iv = $('instrVol')?.value / 100 || 1;
-    if (va) va.volume = vv;
-    if (ia) ia.volume = iv;
-}
-
-// ==================== EQ SYSTEM ====================
-function initEQSliders(stem) {
-    const container = $(`eqSliders-${stem}`);
-    if (!container) return;
-
-    if (!eqStates[stem]) {
-        eqStates[stem] = EQ_BANDS.map(() => 0);
-    }
-
-    container.innerHTML = EQ_BANDS.map((freq, i) => `
-        <div class="eq-band">
-            <input type="range" class="eq-band-slider" id="eq-${stem}-${i}" min="-12" max="12" value="${eqStates[stem][i]}"
-                   oninput="updateEQLabel('${stem}', ${i}, this.value)">
-            <span class="eq-band-label">${freq >= 1000 ? (freq/1000) + 'k' : freq}</span>
-        </div>
-    `).join('');
-}
-
-function updateEQLabel(stem, bandIdx, value) {
-    eqStates[stem][bandIdx] = parseFloat(value);
-}
-
-function toggleEQ(stem) {
-    const panel = $(`eq-${stem}`);
-    if (panel) {
-        panel.classList.toggle('hidden');
-        if (!panel.classList.contains('hidden')) {
-            initEQSliders(stem);
-        }
-    }
-}
-
-async function applyEQ(stem) {
-    if (!currentJob || !eqStates[stem]) return;
-    toast(`Применение EQ к ${stem}...`, 'info');
-    try {
-        const res = await fetch(`${api()}/api/eq/${currentJob}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ stem, bands: eqStates[stem] })
-        });
-        const d = await res.json();
-        if (d.url) {
-            const audio = $(`stem_${stem}`) || $(stem === 'vocals' ? 'vocalsAudio' : stem === 'instrumental' ? 'instrAudio' : null);
-            if (audio) audio.src = `${api()}${d.url}`;
-            toast(`EQ применён к ${stem}`, 'success');
-        }
-    } catch (e) {
-        toast('Ошибка EQ: ' + e.message, 'error');
-    }
-}
-
-// ==================== EFFECTS SYSTEM ====================
-function toggleEffects(stem) {
-    const panel = $(`fx-${stem}`);
-    if (panel) panel.classList.toggle('hidden');
-}
-
-async function applyEffect(stem, effect) {
-    if (!currentJob) return;
-    toast(`Применение ${effect} к ${stem}...`, 'info');
-
-    const defaultParams = {
-        reverb: { mix: 0.3, decay: 2.0 },
-        compressor: { threshold: -20, ratio: 4, attack: 10, release: 100 },
-        chorus: { rate: 1.5, depth: 0.7, mix: 0.5 },
-        pitchshift: { semitones: 0 }
-    };
-
-    try {
-        const res = await fetch(`${api()}/api/effect/${currentJob}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ stem, effect, params: defaultParams[effect] || {} })
-        });
-        const d = await res.json();
-        if (d.url) {
-            const audio = $(`stem_${stem}`) || $(stem === 'vocals' ? 'vocalsAudio' : stem === 'instrumental' ? 'instrAudio' : null);
-            if (audio) audio.src = `${api()}${d.url}`;
-            toast(`${effect} применён к ${stem}`, 'success');
-        }
-    } catch (e) {
-        toast('Ошибка эффекта: ' + e.message, 'error');
-    }
-}
-
-// ==================== ANALYSIS ====================
-async function runAnalysis() {
-    $('progressContainer').classList.remove('hidden');
-    updateProgress(20, 'АНАЛИЗ BPM...');
-
-    try {
-        const res = await fetch(`${api()}/api/analyze/${currentJob}`, { method: 'POST' });
-        if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
-        const d = await res.json();
-
-        updateProgress(100, 'АНАЛИЗ ЗАВЕРШЁН!');
-
-        setTimeout(() => {
-            $('progressContainer').classList.add('hidden');
-            $('analysisResult').classList.remove('hidden');
-
-            $('analysisGrid').innerHTML = `
-                <div class="analysis-item"><div class="analysis-value">🥁 ${d.bpm}</div><div class="analysis-label">BPM</div></div>
-                <div class="analysis-item"><div class="analysis-value">🎵 ${d.key}</div><div class="analysis-label">Тональность</div></div>
-                <div class="analysis-item"><div class="analysis-value">${fmtDur(d.duration)}</div><div class="analysis-label">Длительность</div></div>
-                <div class="analysis-item"><div class="analysis-value">${d.lufs}</div><div class="analysis-label">LUFS</div></div>
-                <div class="analysis-item"><div class="analysis-value">${d.peak.toFixed(2)}</div><div class="analysis-label">Peak</div></div>
-                <div class="analysis-item"><div class="analysis-value">${d.dynamic_range}</div><div class="analysis-label">DR (dB)</div></div>
-            `;
-
-            $('spectralBars').innerHTML = `
-                <div class="energy-bar bass" style="height: ${d.bassEnergy * 100}%" data-label="BASS"></div>
-                <div class="energy-bar mid" style="height: ${d.midEnergy * 100}%" data-label="MID"></div>
-                <div class="energy-bar high" style="height: ${d.highEnergy * 100}%" data-label="HIGH"></div>
-            `;
-
-            toast('✓ Анализ завершён!', 'success');
-        }, 500);
-    } catch (e) {
-        toast('Ошибка анализа: ' + e.message, 'error');
-        $('progressContainer').classList.add('hidden');
-    }
-}
-
-// ==================== EXPORT ====================
-async function exportAudio(type) {
-    if (!currentJob) return;
-    toast(`Экспорт ${type}...`, 'info');
-    try {
-        const res = await fetch(`${api()}/api/export/${currentJob}/${type}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ format: 'mp3', bitrate: 320 })
-        });
-        const d = await res.json();
-        const a = document.createElement('a');
-        a.href = `${api()}${d.url}`;
-        a.download = `${currentJob}_${type}.mp3`;
-        a.click();
-        toast(`✓ ${type}.mp3 сохранён`, 'success');
-    } catch (e) { toast('Ошибка: ' + e.message, 'error'); }
-}
-
-async function exportAll() {
-    if (!currentJob) return;
-    const stems = Object.keys(stemsData);
-    if (!stems.length && $('vocalsAudio')?.src && $('instrAudio')?.src) {
-        await exportAudio('vocals');
-        await sleep(500);
-        await exportAudio('instrumental');
-        toast('✓ Все стемы экспортированы', 'success');
-        return;
-    }
-    for (const stem of stems) {
-        await exportAudio(stem);
-        await sleep(500);
-    }
-    toast('✓ Все стемы экспортированы', 'success');
-}
-
-// ==================== YOUTUBE ====================
-async function downloadYouTube() {
-    const url = $('youtubeUrl').value.trim();
-    if (!url) { toast('Вставьте ссылку на YouTube', 'warning'); return; }
-    if (!url.includes('youtube.com') && !url.includes('youtu.be')) { toast('Неверная ссылка', 'warning'); return; }
-
-    showLoading('ЗАГРУЗКА С YOUTUBE...');
-    $('progressContainer').classList.remove('hidden');
-    updateProgress(10, 'ПОДКЛЮЧЕНИЕ К YOUTUBE...');
-
-    try {
-        const res = await fetch(`${api()}/api/youtube`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-        });
-        if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
-        const d = await res.json();
-
-        files.push({ jobId: d.jobId, filename: 'YouTube Audio', info: d.info });
-        currentIdx = files.length - 1;
-        currentJob = d.jobId;
-
-        updateProgress(100, 'ЗАГРУЗКА ЗАВЕРШЕНА!');
-        hideLoading();
-
-        setTimeout(() => {
-            $('progressContainer').classList.add('hidden');
-            updateList();
-            switchView('workspace');
-            document.querySelector('[data-view="workspace"]').click();
-            toast('✓ YouTube аудио загружено', 'success');
-        }, 500);
-    } catch (e) {
-        hideLoading();
-        toast('Ошибка: ' + e.message, 'error');
-        $('progressContainer').classList.add('hidden');
-    }
-}
-
-function setYouTubeExample(url) {
-    $('youtubeUrl').value = url;
-}
-
-// ==================== HISTORY ====================
-async function loadHistory() {
-    try {
-        const res = await fetch(`${api()}/api/history`);
-        const history = await res.json();
-        const el = $('historyList');
-
-        if (!history.length) {
-            el.innerHTML = '<div class="empty-state"><i class="bi bi-clock"></i><p>История пуста</p></div>';
-            if ($('historyTrackCount')) $('historyTrackCount').textContent = '0';
-            return;
-        }
-
-        if ($('historyTrackCount')) $('historyTrackCount').textContent = String(history.length);
-
-        el.innerHTML = history.map(h => `
-            <div class="history-item" onclick="loadFromHistory('${h.jobId}')">
-                <div class="file-item-icon"><i class="bi bi-music-note-beamed"></i></div>
-                <div class="file-item-info" style="flex:1">
-                    <div class="file-item-name">${h.filename}</div>
-                    <div class="file-item-meta">${new Date(h.date).toLocaleString('ru-RU')} // ${h.type || '2stem'} // ${h.preset || 'default'}</div>
-                </div>
-                <button class="btn-icon" onclick="event.stopPropagation(); deleteHistory('${h.jobId}')">
-                    <i class="bi bi-trash3"></i>
-                </button>
-            </div>
-        `).join('');
-    } catch (e) { }
-}
-
-async function loadFromHistory(jobId) {
-    currentJob = jobId;
-    switchView('workspace');
-    document.querySelector('[data-view="workspace"]').click();
-    loadPreview(jobId);
-    toast('Загружено из истории', 'info');
-}
-
-async function deleteHistory(jobId) {
-    await fetch(`${api()}/api/history/${jobId}`, { method: 'DELETE' });
-    loadHistory();
-    toast('Удалено из истории', 'info');
-}
-
-async function clearHistory() {
-    const history = await fetch(`${api()}/api/history`).then(r => r.json());
-    for (const h of history) await fetch(`${api()}/api/history/${h.jobId}`, { method: 'DELETE' });
-    loadHistory();
-    toast('История очищена', 'info');
-}
-
-// ==================== LIBRARY ====================
-async function loadLibrary() {
-    const el = $('libraryList');
-    if (!el) return; // library view may not exist
-    if (!files.length) {
-        el.innerHTML = '<div class="empty-state"><i class="bi bi-inbox"></i><p>Библиотека пуста</p><span>Загрузите треки для начала работы</span></div>';
-        if ($('libraryTrackCount')) $('libraryTrackCount').textContent = '0';
-        return;
-    }
-
-    if ($('libraryTrackCount')) $('libraryTrackCount').textContent = String(files.length);
-
-    el.innerHTML = files.map((f, i) => `
-        <div class="library-item" onclick="selectFile(${i}); switchView('workspace'); document.querySelector('[data-view=\\'workspace\\']').click();">
-            <div class="file-item-icon"><i class="bi bi-music-note-beamed"></i></div>
-            <div class="file-item-info">
-                <div class="file-item-name">${f.filename}</div>
-                <div class="file-item-meta">${f.info ? fmtDur(f.info.duration) + ' • ' + fmtSize(f.info.size) : fmtSize(f.size)}</div>
-            </div>
-        </div>
-    `).join('');
-}
-
-// ==================== SESSION SAVE/LOAD ====================
-function saveSession() {
-    session = {
-        files: files.map(f => ({ jobId: f.jobId, filename: f.filename, size: f.size })),
-        currentIdx,
-        mode,
-        quality,
-        preset,
-        selectedModel
-    };
-    try { localStorage.setItem('vrp_session_v5', JSON.stringify(session)); } catch (e) { }
-}
-
-function loadSession() {
-    try {
-        const saved = localStorage.getItem('vrp_session_v5');
-        if (saved) {
-            session = JSON.parse(saved);
-            mode = session.mode || '2stem';
-            quality = session.quality || 'quality';
-            preset = session.preset || 'default';
-            selectedModel = session.selectedModel || 'modern_ensemble';
-            setMode(mode);
-            setQuality(quality);
-            document.querySelectorAll('.preset-btn').forEach(b => {
-                b.classList.toggle('active', b.dataset.preset === preset);
-            });
-            if ($('modelSelect')) $('modelSelect').value = selectedModel;
-        }
-    } catch (e) { }
-}
-
-// ==================== LOADING OVERLAY ====================
-function showLoading(text = 'ЗАГРУЗКА...') {
-    const overlay = $('loadingOverlay');
-    overlay.classList.remove('hidden');
-    const txt = overlay.querySelector('.loading-text');
-    if (txt) txt.textContent = text;
-}
-
-function hideLoading() {
-    $('loadingOverlay').classList.add('hidden');
-}
-
-// ==================== UTILITIES ====================
-function fmtDur(s) {
-    if (!s) return '--:--';
-    const m = Math.floor(s / 60);
-    return `${m}:${(s % 60).toString().padStart(2, '0')}`;
-}
-
-function fmtSize(b) {
-    if (!b) return '--';
-    return b < 1048576 ? (b / 1024).toFixed(1) + ' KB' : (b / 1048576).toFixed(1) + ' MB';
-}
-
-function updateProgress(pct, txt) {
-    const bar = $('progressBar');
-    const text = $('progressText');
-    if (bar) bar.style.width = pct + '%';
-    if (text) text.textContent = txt;
-    updateWorkspaceState({ status: txt || 'Обработка...' });
-}
-
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-function resetApp() {
-    files = [];
-    currentIdx = 0;
-    currentJob = null;
-    stemsData = {};
-    soloedStem = null;
-    eqStates = {};
-    $('fileInput').value = '';
-    $('youtubeUrl').value = '';
-    ['previewAudio', 'vocalsAudio', 'instrAudio'].forEach(id => { if ($(id)) $(id).src = ''; });
-    $('audioPreview').classList.add('hidden');
-    $('analysisResult').classList.add('hidden');
-    $('resultContainer2').classList.add('hidden');
-    $('resultContainerMulti').classList.add('hidden');
-    $('compareContainer')?.classList.add('hidden');
-    $('progressContainer').classList.add('hidden');
-    $('resetSection').classList.add('hidden');
-    updateList();
-    updateWorkspaceState({ status: 'Ожидание' });
-    updateResultSummary(2, { count: 2, status: 'Готово' });
-    updateResultSummary('multi', { count: 0, status: 'Готово' });
-    toast('Сброшено', 'info');
-}
+}[m]));
+    22|    22|}
+    23|    23|
+    24|// ==================== API BASE URL (RELATIVE PATHS) ====================
+    25|let _apiBase = ''; // always use relative paths
+    26|
+    27|async function getAPI() {
+    28|    return _apiBase;
+    29|}
+    30|
+    31|// Synchronous getter (cached value)
+    32|function api() {
+    33|    return _apiBase;
+    34|}
+    35|    47|
+    36|    48|// ==================== STATE ====================
+    37|    49|
+    38|    50|// WebSocket progress connection
+    39|    51|let wsProgress = null;
+    40|    52|let wsCurrentJobId = null;
+    41|    53|
+    42|    54|/**
+    43|    55| * Инициализация WebSocket для прогресса
+    44|    56| */
+    45|    57|function initWebSocketProgress() {
+    46|    58|    if (wsProgress) return; // Уже инициализировано
+    47|    59|    
+    48|    60|    try {
+    49|    61|        wsProgress = createProgressWebSocket();
+    50|    62|        
+    51|    63|        // Слушаем прогресс
+    52|    64|        wsProgress.on('progress', (data) => {
+    53|    65|            console.log('[WS] Progress:', data.percent, data.message);
+    54|    66|            updateProgress(data.percent || 0, data.message || 'Обработка...');
+    55|    67|        });
+    56|    68|
+    57|    69|        wsProgress.on('complete', (data) => {
+    58|    70|            console.log('[WS] Complete:', data);
+    59|    71|            updateProgress(100, data.message || 'Готово!');
+    60|    72|            hideLoading();
+    61|    73|            toast('✓ Обработка завершена!', 'success');
+    62|    74|        });
+    63|    75|
+    64|    76|        wsProgress.on('error', (data) => {
+    65|    77|            console.error('[WS] Error:', data);
+    66|    78|            hideLoading();
+    67|    79|            $('progressContainer').classList.add('hidden');
+    68|    80|            toast('Ошибка: ' + (data.message || 'Неизвестная ошибка'), 'error');
+    69|    81|        });
+    70|    82|
+    71|    83|        wsProgress.on('start', (data) => {
+    72|    84|            console.log('[WS] Job started:', data);
+    73|    85|            $('progressContainer').classList.remove('hidden');
+    74|    86|            updateProgress(5, 'Запуск обработки...');
+    75|    87|        });
+    76|    88|
+    77|    89|        console.log('[WS] Progress WebSocket initialized');
+    78|    90|    } catch (e) {
+    79|    91|        console.warn('[WS] Failed to initialize WebSocket:', e.message);
+    80|    92|        // Fallback: без WebSocket прогресса
+    81|    93|        wsProgress = null;
+    82|    94|    }
+    83|    95|}
+    84|    96|let files = [];
+    85|    97|let currentIdx = 0;
+    86|    98|let currentJob = null;
+    87|    99|let mode = '2stem';
+    88|   100|let quality = 'quality';
+    89|   101|let preset = 'default';
+    90|   102|let selectedModel = 'modern_ensemble';
+    91|   103|let modelRegistry = {};
+    92|   104|let modelStatusRegistry = {};
+    93|   105|let stemsData = {};
+    94|   106|let session = {};
+    95|   107|let soloedStem = null;
+    96|   108|let stemStates = {};
+    97|   109|let eqStates = {};
+    98|   110|const EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+    99|   111|
+   100|   112|// ==================== BATCH PROCESSING ====================
+   101|   113|let batchQueue = [];          // очередь заданий
+   102|   114|let batchProcessing = false;  // флаг обработки
+   103|   115|let batchPaused = false;      // флаг паузы
+   104|   116|let maxConcurrent = 2;        // макс одновременно
+   105|   117|let activeJobs = new Set();   // активные задачи
+   106|   118|
+   107|   119|// Статусы файлов в очереди
+   108|   120|const BATCH_STATUS = {
+   109|   121|    PENDING: 'pending',     // ожидает
+   110|   122|    PROCESSING: 'processing', // обрабатывается
+   111|   123|    COMPLETED: 'completed', // завершён
+   112|   124|    ERROR: 'error',         // ошибка
+   113|   125|    CANCELLED: 'cancelled'  // отменён
+   114|   126|};
+   115|   127|
+   116|   128|// ==================== DOM HELPERS ====================
+   117|   129|const $ = id => document.getElementById(id);
+   118|   130|
+   119|   131|// ==================== INITIALIZATION ====================
+   120|   132|document.addEventListener('DOMContentLoaded', () => {
+   121|   133|    getAPI(); // probe API base URL
+   122|   134|    initNavigation();
+   123|   135|    initKeyboard();
+   124|   136|    initDropZone();
+   125|   137|    initPresets();
+   126|   138|    loadSession();
+   127|   139|    loadHistory();
+   128|   140|    initMobileResponsive();
+   129|   141|    loadModelRegistry();
+   130|   142|    updateWorkspaceState();
+   131|   143|});
+   132|   144|
+   133|   145|function updateWorkspaceState(state = {}) {
+   134|   146|    const modeLabels = {
+   135|   147|        '2stem': '2 STEMS',
+   136|   148|        '4stem': '4 STEMS',
+   137|   149|        '6stem': '6 STEMS'
+   138|   150|    };
+   139|   151|
+   140|   152|    const activeFile = files[currentIdx];
+   141|   153|    const statusText = state.status || (activeFile ? 'Файл готов' : 'Ожидание');
+   142|   154|    const heroText = activeFile
+   143|   155|        ? `Активный файл: ${activeFile.filename}. Выберите режим, настройте силу разделения и запустите обработку.`
+   144|   156|        : 'Сейчас в сессии нет активного файла. Перетащите трек в левую панель или откройте YouTube-вкладку для импорта аудио.';
+   145|   157|
+   146|   158|    if ($('statusFileCount')) $('statusFileCount').textContent = String(files.length);
+   147|   159|    if ($('statusMode')) $('statusMode').textContent = modeLabels[mode] || mode.toUpperCase();
+   148|   160|    if ($('statusPreset')) $('statusPreset').textContent = (preset || 'default').toUpperCase();
+   149|   161|    if ($('statusState')) $('statusState').textContent = statusText;
+   150|   162|    if ($('heroStateText')) $('heroStateText').textContent = heroText;
+   151|   163|    if ($('heroStateCard')) $('heroStateCard').classList.toggle('hidden', Boolean(activeFile));
+   152|   164|
+   153|   165|    if ($('resultSummary2Mode')) $('resultSummary2Mode').textContent = modeLabels[mode] || mode.toUpperCase();
+   154|   166|    if ($('resultSummary2Preset')) $('resultSummary2Preset').textContent = (preset || 'default').toUpperCase();
+   155|   167|    if ($('resultSummaryMultiMode')) $('resultSummaryMultiMode').textContent = modeLabels[mode] || mode.toUpperCase();
+   156|   168|    if ($('resultSummaryMultiPreset')) $('resultSummaryMultiPreset').textContent = (preset || 'default').toUpperCase();
+   157|   169|
+   158|   170|    const activeModel = modelRegistry[selectedModel];
+   159|   171|    const runtimeStatus = modelStatusRegistry[selectedModel];
+   160|   172|    if ($('activeModelName')) $('activeModelName').textContent = activeModel?.name || 'Model not loaded';
+   161|   173|    if ($('activeModelBadge')) $('activeModelBadge').textContent = activeModel?.badge || 'Unknown';
+   162|   174|    if ($('activeModelDescription')) $('activeModelDescription').textContent = activeModel?.description || 'Список моделей ещё загружается.';
+   163|   175|    if ($('activeModelFamily')) $('activeModelFamily').textContent = activeModel?.family || 'Unknown';
+   164|   176|    if ($('activeModelBackend')) $('activeModelBackend').textContent = `backend: ${runtimeStatus?.backend || activeModel?.backend || 'unknown'}`;
+   165|   177|    if ($('activeModelState')) $('activeModelState').textContent = runtimeStatus?.available === false ? 'limited' : 'ready';
+   166|   178|}
+   167|   179|
+   168|   180|async function loadModelRegistry() {
+   169|   181|    try {
+   170|   182|        const [modelsRes, statusRes] = await Promise.all([
+   171|   183|            fetch(`${api()}/api/models`),
+   172|   184|            fetch(`${api()}/api/models/status`)
+   173|   185|        ]);
+   174|   186|
+   175|   187|        modelRegistry = modelsRes.ok ? await modelsRes.json() : {};
+   176|   188|        const statusJson = statusRes.ok ? await statusRes.json() : {};
+   177|   189|        modelStatusRegistry = statusJson.models || {};
+   178|   190|        populateModelSelect();
+   179|   191|        updateWorkspaceState();
+   180|   192|    } catch (e) {
+   181|   193|        console.warn('Model registry load failed:', e.message);
+   182|   194|    }
+   183|   195|}
+   184|   196|
+   185|   197|function populateModelSelect() {
+   186|   198|    const select = $('modelSelect');
+   187|   199|    if (!select) return;
+   188|   200|    const compareA = $('compareModelA');
+   189|   201|    const compareB = $('compareModelB');
+   190|   202|
+   191|   203|    const preferredOrder = ['modern_ensemble', 'demucs', 'htdemucs_ft', 'mdxnet', 'bandit', 'melband', 'scnet', 'vrnet', 'openunmix', 'asteroid', 'spleeter', 'ensemble', 'uvr5_mdx', 'uvr5_vr', 'lalal', 'legacy'];
+   192|   204|    const entries = preferredOrder.filter(key => modelRegistry[key]).map(key => [key, modelRegistry[key]]);
+   193|   205|
+   194|   206|    select.innerHTML = entries.map(([key, model]) => {
+   195|   207|        const status = modelStatusRegistry[key];
+   196|   208|        const suffix = status?.available === false ? ' • limited' : ' • local';
+   197|   209|        return `<option value="${key}" ${key === selectedModel ? 'selected' : ''}>${model.name}${suffix}</option>`;
+   198|   210|    }).join('');
+   199|   211|
+   200|   212|    if (!modelRegistry[selectedModel] && entries.length) {
+   201|   213|        selectedModel = entries[0][0];
+   202|   214|        select.value = selectedModel;
+   203|   215|    }
+   204|   216|
+   205|   217|    const compareOptions = entries.map(([key, model]) => `<option value="${key}">${model.name}</option>`).join('');
+   206|   218|    if (compareA) compareA.innerHTML = compareOptions;
+   207|   219|    if (compareB) compareB.innerHTML = compareOptions;
+   208|   220|    if (compareA && !compareA.value) compareA.value = 'modern_ensemble';
+   209|   221|    if (compareB && !compareB.value) compareB.value = 'demucs';
+   210|   222|}
+   211|   223|
+   212|   224|function updateResultSummary(type, details = {}) {
+   213|   225|    const targets = {
+   214|   226|        2: {
+   215|   227|            mode: $('resultSummary2Mode'),
+   216|   228|            preset: $('resultSummary2Preset'),
+   217|   229|            count: $('resultSummary2Count'),
+   218|   230|            status: $('resultSummary2Status')
+   219|   231|        },
+   220|   232|        multi: {
+   221|   233|            mode: $('resultSummaryMultiMode'),
+   222|   234|            preset: $('resultSummaryMultiPreset'),
+   223|   235|            count: $('resultSummaryMultiCount'),
+   224|   236|            status: $('resultSummaryMultiStatus')
+   225|   237|        }
+   226|   238|    };
+   227|   239|
+   228|   240|    const modeLabels = {
+   229|   241|        '2stem': '2 STEMS',
+   230|   242|        '4stem': '4 STEMS',
+   231|   243|        '6stem': '6 STEMS'
+   232|   244|    };
+   233|   245|
+   234|   246|    const bucket = targets[type];
+   235|   247|    if (!bucket) return;
+   236|   248|
+   237|   249|    if (bucket.mode) bucket.mode.textContent = details.modeLabel || modeLabels[mode] || mode.toUpperCase();
+   238|   250|    if (bucket.preset) bucket.preset.textContent = details.presetLabel || (preset || 'default').toUpperCase();
+   239|   251|    if (bucket.count) bucket.count.textContent = String(details.count ?? 0);
+   240|   252|    if (bucket.status) bucket.status.textContent = details.status || 'Готово';
+   241|   253|
+   242|   254|    if (type === 2 && $('resultBackendTrace')) {
+   243|   255|        const backend = details.runtimeBackend || modelStatusRegistry[selectedModel]?.backend || modelRegistry[selectedModel]?.backend || 'unknown';
+   244|   256|        const requested = details.modelRequested || selectedModel;
+   245|   257|        const used = details.modelUsed || selectedModel;
+   246|   258|        $('resultBackendTrace').textContent = `requested: ${requested} / used: ${used} / backend: ${backend}`;
+   247|   259|    }
+   248|   260|}
+   249|   261|
+   250|   262|// ==================== MOBILE RESPONSIVE ====================
+   251|   263|function initMobileResponsive() {
+   252|   264|    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+   253|   265|    const appNav = document.getElementById('appNav');
+   254|   266|    
+   255|   267|    // Show/hide hamburger menu based on screen width
+   256|   268|    function updateMobileMenuVisibility() {
+   257|   269|        if (window.innerWidth <= 768) {
+   258|   270|            // Mobile: show hamburger, hide nav items
+   259|   271|            if (mobileMenuBtn) mobileMenuBtn.classList.remove('hidden');
+   260|   272|            if (appNav) appNav.style.display = 'none';
+   261|   273|        } else {
+   262|   274|            // Desktop: hide hamburger, show nav
+   263|   275|            if (mobileMenuBtn) mobileMenuBtn.classList.add('hidden');
+   264|   276|            if (appNav) appNav.style.display = 'flex';
+   265|   277|        }
+   266|   278|    }
+   267|   279|    
+   268|   280|    // Initial check
+   269|   281|    updateMobileMenuVisibility();
+   270|   282|    
+   271|   283|    // Listen to window resize
+   272|   284|    window.addEventListener('resize', updateMobileMenuVisibility);
+   273|   285|    
+   274|   286|    // Prevent body scroll when mobile menu is open
+   275|   287|    const overlay = document.getElementById('mobileMenuOverlay');
+   276|   288|    if (overlay) {
+   277|   289|        overlay.addEventListener('click', toggleMobileMenu);
+   278|   290|    }
+   279|   291|}
+   280|   292|
+   281|   293|function toggleMobileMenu() {
+   282|   294|    const overlay = document.getElementById('mobileMenuOverlay');
+   283|   295|    const appNav = document.getElementById('appNav');
+   284|   296|    
+   285|   297|    if (!overlay || !appNav) return;
+   286|   298|    
+   287|   299|    const isHidden = overlay.classList.contains('hidden');
+   288|   300|    
+   289|   301|    if (isHidden) {
+   290|   302|        // Open menu
+   291|   303|        overlay.classList.remove('hidden');
+   292|   304|        appNav.classList.remove('hidden');
+   293|   305|        appNav.style.display = 'flex';
+   294|   306|        appNav.style.position = 'fixed';
+   295|   307|        appNav.style.top = '120px';
+   296|   308|        appNav.style.left = '0';
+   297|   309|        appNav.style.right = '0';
+   298|   310|        appNav.style.zIndex = '1000';
+   299|   311|        appNav.style.flexDirection = 'column';
+   300|   312|        appNav.style.gap = '4px';
+   301|   313|        appNav.style.margin = '0';
+   302|   314|        appNav.style.padding = '8px';
+   303|   315|        appNav.style.background = 'var(--bg-card)';
+   304|   316|        appNav.style.borderBottom = '1px solid var(--border-subtle)';
+   305|   317|        appNav.style.borderRadius = '0';
+   306|   318|        document.body.style.overflow = 'hidden';
+   307|   319|    } else {
+   308|   320|        // Close menu
+   309|   321|        overlay.classList.add('hidden');
+   310|   322|        appNav.classList.add('hidden');
+   311|   323|        appNav.style.position = 'relative';
+   312|   324|        appNav.style.top = 'auto';
+   313|   325|        appNav.style.left = 'auto';
+   314|   326|        appNav.style.right = 'auto';
+   315|   327|        appNav.style.zIndex = 'auto';
+   316|   328|        appNav.style.flexDirection = 'row';
+   317|   329|        appNav.style.margin = '0';
+   318|   330|        appNav.style.padding = '10px';
+   319|   331|        appNav.style.background = 'transparent';
+   320|   332|        appNav.style.borderBottom = 'none';
+   321|   333|        appNav.style.display = 'flex';
+   322|   334|        document.body.style.overflow = 'auto';
+   323|   335|    }
+   324|   336|}
+   325|   337|
+   326|   338|
+   327|   339|
+   328|   340|// ==================== TOAST NOTIFICATIONS ====================
+   329|   341|function toast(msg, type = 'info') {
+   330|   342|    const icons = {
+   331|   343|        success: 'check-circle-fill',
+   332|   344|        error: 'exclamation-triangle-fill',
+   333|   345|        warning: 'exclamation-circle-fill',
+   334|   346|        info: 'info-circle-fill'
+   335|   347|    };
+   336|   348|    const t = document.createElement('div');
+   337|   349|    t.className = `toast ${type}`;
+   338|   350|    const icon = document.createElement('i');
+   339|   351|    icon.className = `bi bi-${icons[type]}`;
+   340|   352|    const span = document.createElement('span');
+   341|   353|    span.textContent = msg; // XSS-safe
+   342|   354|    t.appendChild(icon);
+   343|   355|    t.appendChild(span);
+   344|   356|    $('toastContainer').appendChild(t);
+   345|   357|    setTimeout(() => {
+   346|   358|        t.style.opacity = '0';
+   347|   359|        t.style.transform = 'translateX(100%)';
+   348|   360|        t.style.transition = 'all 0.3s ease';
+   349|   361|        setTimeout(() => t.remove(), 300);
+   350|   362|    }, 4000);
+   351|   363|}
+   352|   364|
+   353|   365|// ==================== NAVIGATION ====================
+   354|   366|function initNavigation() {
+   355|   367|    document.querySelectorAll('.nav-btn').forEach(btn => {
+   356|   368|        btn.onclick = () => {
+   357|   369|            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+   358|   370|            btn.classList.add('active');
+   359|   371|            switchView(btn.dataset.view);
+   360|   372|            
+   361|   373|            // Close mobile menu after navigation (mobile only)
+   362|   374|            if (window.innerWidth <= 768) {
+   363|   375|                setTimeout(() => {
+   364|   376|                    const overlay = document.getElementById('mobileMenuOverlay');
+   365|   377|                    if (overlay && !overlay.classList.contains('hidden')) {
+   366|   378|                        toggleMobileMenu();
+   367|   379|                    }
+   368|   380|                }, 100);
+   369|   381|            }
+   370|   382|        };
+   371|   383|    });
+   372|   384|}
+   373|   385|
+   374|   386|function switchView(view) {
+   375|   387|    const ws = $('workspaceView');
+   376|   388|    const lib = $('libraryView');
+   377|   389|    const yt = $('youtubeView');
+   378|   390|    const hist = $('historyView');
+   379|   391|    if (ws) ws.classList.toggle('hidden', view !== 'workspace');
+   380|   392|    if (lib) lib.classList.toggle('hidden', view !== 'library');
+   381|   393|    if (yt) yt.classList.toggle('hidden', view !== 'youtube');
+   382|   394|    if (hist) hist.classList.toggle('hidden', view !== 'history');
+   383|   395|    if (view === 'history') loadHistory();
+   384|   396|    if (view === 'library' && lib) loadLibrary();
+   385|   397|    updateWorkspaceState();
+   386|   398|}
+   387|   399|
+   388|   400|// ==================== KEYBOARD SHORTCUTS ====================
+   389|   401|function initKeyboard() {
+   390|   402|    document.addEventListener('keydown', e => {
+   391|   403|        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+   392|   404|        switch(e.key.toLowerCase()) {
+   393|   405|            case ' ':
+   394|   406|                e.preventDefault();
+   395|   407|                togglePlayPause();
+   396|   408|                break;
+   397|   409|            case 's':
+   398|   410|                if (!e.ctrlKey && !e.metaKey) processCurrent();
+   399|   411|                break;
+   400|   412|            case 'r':
+   401|   413|                resetApp();
+   402|   414|                break;
+   403|   415|            case 'o':
+   404|   416|                if (e.ctrlKey || e.metaKey) {
+   405|   417|                    e.preventDefault();
+   406|   418|                    $('fileInput').click();
+   407|   419|                }
+   408|   420|                break;
+   409|   421|            case 'escape':
+   410|   422|                resetApp();
+   411|   423|                break;
+   412|   424|        }
+   413|   425|    });
+   414|   426|}
+   415|   427|
+   416|   428|function togglePlayPause() {
+   417|   429|    const audio = $('previewAudio');
+   418|   430|    if (audio?.src) {
+   419|   431|        audio.paused ? audio.play() : audio.pause();
+   420|   432|        updatePlayBtn(!audio.paused);
+   421|   433|    }
+   422|   434|}
+   423|   435|
+   424|   436|function updatePlayBtn(playing) {
+   425|   437|    const btn = $('playBtn');
+   426|   438|    if (btn) {
+   427|   439|        btn.innerHTML = playing ? '<i class="bi bi-pause-fill"></i>' : '<i class="bi bi-play-fill"></i>';
+   428|   440|    }
+   429|   441|}
+   430|   442|
+   431|   443|function skipAudio(seconds) {
+   432|   444|    const audio = $('previewAudio');
+   433|   445|    if (audio?.src) {
+   434|   446|        audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + seconds));
+   435|   447|    }
+   436|   448|}
+   437|   449|
+   438|   450|// ==================== DRAG & DROP ====================
+   439|   451|function initDropZone() {
+   440|   452|    const dz = $('dropZone');
+   441|   453|    const fi = $('fileInput');
+   442|   454|
+   443|   455|    dz.onclick = () => fi.click();
+   444|   456|
+   445|   457|    dz.ondragover = e => {
+   446|   458|        e.preventDefault();
+   447|   459|        dz.classList.add('dragover');
+   448|   460|    };
+   449|   461|
+   450|   462|    dz.ondragleave = () => dz.classList.remove('dragover');
+   451|   463|
+   452|   464|    dz.ondrop = e => {
+   453|   465|        e.preventDefault();
+   454|   466|        dz.classList.remove('dragover');
+   455|   467|        if (e.dataTransfer.files.length) handleFiles([...e.dataTransfer.files]);
+   456|   468|    };
+   457|   469|
+   458|   470|    fi.onchange = e => {
+   459|   471|        if (e.target.files.length) handleFiles([...e.target.files]);
+   460|   472|    };
+   461|   473|}
+   462|   474|
+   463|   475|// ==================== FILE HANDLING ====================
+   464|   476|async function handleFiles(fileArr) {
+   465|   477|    for (const file of fileArr) {
+   466|   478|        const ext = file.name.split('.').pop().toLowerCase();
+   467|   479|        const allowed = ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'mp4', 'aac', 'aiff', 'wma', 'opus'];
+   468|   480|        if (!allowed.includes(ext)) {
+   469|   481|            toast(`${file.name} — неподдерживаемый формат`, 'error');
+   470|   482|            continue;
+   471|   483|        }
+   472|   484|
+   473|   485|        const fd = new FormData();
+   474|   486|        fd.append('audio', file);
+   475|   487|
+   476|   488|        try {
+   477|   489|            showLoading('ЗАГРУЗКА ФАЙЛА...');
+   478|   490|            const res = await fetch(`${api()}/api/upload`, { method: 'POST', body: fd });
+   479|   491|            const data = await res.json();
+   480|   492|            hideLoading();
+   481|   493|            if (data.error) { toast(data.error, 'error'); continue; }
+   482|   494|            files.push({ ...data, file });
+   483|   495|            toast(`✓ ${file.name}`, 'success');
+   484|   496|        } catch (e) {
+   485|   497|            hideLoading();
+   486|   498|            toast(`Ошибка загрузки: ${file.name}`, 'error');
+   487|   499|        }
+   488|   500|    }
+   489|   501|

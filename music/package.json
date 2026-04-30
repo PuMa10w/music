@@ -4,8 +4,8 @@
   "description": "Voice remover from songs with YouTube download",
   "main": "server.js",
   "scripts": {
-    "start": "cross-env PYTHON_PATH=C:\\Users\\rousl\\AppData\\Local\\Programs\\Python\\Python312\\python.exe node server.js",
-    "dev": "cross-env PYTHON_PATH=C:\\Users\\rousl\\AppData\\Local\\Programs\\Python\\Python312\\python.exe node server.js"
+    "start": "node server.js",
+    "dev": "node server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
