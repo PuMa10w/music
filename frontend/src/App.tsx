@@ -13,6 +13,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl, analyzeTrack, masterTrack, replaceVideoAudio, analyzeHarmonic } from './api/api'
 import { useToast } from './hooks/useToast'
 import Toast from './components/Toast'
+import SystemStatus from './components/SystemStatus'
 
 function App() {
   const files = useStore(s => s.files)
@@ -363,6 +364,8 @@ function App() {
 
           {/* Спектрограмма для превью */}
           {!isVideo && previewUrl && <Spectrogram audioUrl={previewUrl} />}
+          
+          <SystemStatus />
         </main>
     </motion.div>
   </ErrorBoundary>

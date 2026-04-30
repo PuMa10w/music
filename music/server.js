@@ -1635,6 +1635,112 @@ app.post('/api/download-external', async (req, res) => {
     }
 });
 
+// ===== HEALTH CHECK ENDPOINT =====
+app.get('/api/health', async (req, res) => {
+    const health = {
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        services: {
+            redis: { status: 'unknown', message: 'Redis not configured' },
+            python: { status: 'unknown', message: 'Checking...' },
+            disk: { status: 'unknown', message: 'Checking...' }
+        }
+    };
+
+    // Check Python scripts existence
+    try {
+        const pythonScripts = [
+            SEPARATE_SCRIPT,
+            STEMS_SCRIPT,
+            ANALYZE_SCRIPT,
+            EFFECTS_SCRIPT,
+            MODEL_MANAGER,
+            TRANSCRIBE_SCRIPT,
+            HARMONIC_SCRIPT
+        ];
+        
+        const missingScripts = pythonScripts.filter(script => !fs.existsSync(script));
+        
+        if (missingScripts.length === 0) {
+            health.services.python = { status: 'ok', message: 'All Python scripts found' };
+        } else {
+            health.services.python = { 
+                status: 'degraded', 
+                message: `Missing scripts: ${missingScripts.map(s => path.basename(s)).join(', ')}` 
+            };
+            health.status = 'degraded';
+        }
+    } catch (error) {
+        health.services.python = { status: 'error', message: error.message };
+        health.status = 'degraded';
+    }
+
+    // Check disk space
+    try {
+        const checkDiskSpace = () => {
+            return new Promise((resolve, reject) => {
+                const dir = __dirname;
+                fs.statfs ? fs.statfs(dir, (err, stats) => {
+                    if (err) reject(err);
+                    else {
+                        const total = stats.blocks * stats.bsize;
+                        const free = stats.bfree * stats.bsize;
+                        const usedPercent = ((total - free) / total * 100).toFixed(1);
+                        resolve({
+                            total: `${(total / (1024 * 1024 * 1024)).toFixed(2)} GB`,
+                            free: `${(free / (1024 * 1024 * 1024)).toFixed(2)} GB`,
+                            usedPercent: `${usedPercent}%`
+                        });
+                    }
+                }) : reject(new Error('statfs not available'));
+            });
+        };
+
+        // Fallback for systems without statfs
+        const getDiskInfo = () => {
+            try {
+                const stats = fs.statSync(__dirname);
+                return { available: true, message: 'Disk accessible' };
+            } catch (e) {
+                return { available: false, message: e.message };
+            }
+        };
+
+        if (fs.statfs) {
+            const diskInfo = await checkDiskSpace();
+            health.services.disk = { 
+                status: 'ok', 
+                message: `Disk space: ${diskInfo.free} free (${diskInfo.usedPercent} used)` 
+            };
+        } else {
+            const diskInfo = getDiskInfo();
+            health.services.disk = { 
+                status: diskInfo.available ? 'ok' : 'error', 
+                message: diskInfo.message 
+            };
+        }
+    } catch (error) {
+        health.services.disk = { status: 'error', message: error.message };
+    }
+
+    // Check Redis connection (if available)
+    try {
+        // Redis is optional - check if it's configured
+        if (CONFIG.redis && CONFIG.redis.enabled) {
+            // Simple check - in a real implementation you'd use ioredis or redis client
+            health.services.redis = { status: 'not_implemented', message: 'Redis check not implemented' };
+        } else {
+            health.services.redis = { status: 'disabled', message: 'Redis not configured' };
+        }
+    } catch (error) {
+        health.services.redis = { status: 'error', message: error.message };
+    }
+
+    // Return appropriate HTTP status
+    const httpStatus = health.status === 'ok' ? 200 : health.status === 'degraded' ? 200 : 500;
+    res.status(httpStatus).json(health);
+});
+
 // ===== STATUS & DOWNLOAD API =====
 
 // Получить статус задачи (для поллинга)
