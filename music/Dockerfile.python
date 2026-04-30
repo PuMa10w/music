@@ -5,6 +5,9 @@ WORKDIR /app
 # Install system dependencies: ffmpeg (for audio conversion) and libsndfile1 (for soundfile)
 RUN apt-get update && apt-get install -y ffmpeg libsndfile1 && rm -rf /var/lib/apt/lists/*
 
+# Install yt-dlp and whisper explicitly as per plan
+RUN pip install --no-cache-dir yt-dlp openai-whisper
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

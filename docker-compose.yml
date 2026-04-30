@@ -31,6 +31,12 @@ services:
     depends_on:
       - redis
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import demucs, yt_dlp, whisper; print('healthy')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   # Redis for Queue
   redis:

@@ -8,3 +8,5 @@ scipy
 pyloudnorm
 pydub
 soundfile
+yt-dlp
+openai-whisper
