@@ -6,7 +6,7 @@ import VideoPreview from './components/VideoPreview'
 import Spectrogram from './components/Spectrogram'
 import EQ from './components/EQ'
 import { useStore } from './stores/useStore'
-import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl } from './api/api'
+import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl, analyzeTrack } from './api/api'
 
 function App() {
   const files = useStore(s => s.files)
@@ -16,6 +16,7 @@ function App() {
   const [results, setResults] = useState<{ jobId: string, files: string[] } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [batchProgress, setBatchProgress] = useState<{ current: number, total: number } | null>(null)
+  const [bpmKey, setBpmKey] = useState<{ bpm: number, key: string } | null>(null)
 
   // Определяем тип первого файла для превью
   const firstFile = files.length > 0 ? files[0] : null
@@ -71,6 +72,18 @@ function App() {
     } finally {
       setProcessing(false)
       setBatchProgress(null)
+    }
+  }
+
+  const handleAnalyze = async (jobId: string) => {
+    try {
+      setBpmKey(null)
+      const data = await analyzeTrack(jobId)
+      if (data.bpm && data.key) {
+        setBpmKey({ bpm: data.bpm, key: data.key })
+      }
+    } catch (e: any) {
+      setError(e.message || 'Analysis failed')
     }
   }
 
@@ -161,7 +174,6 @@ function App() {
                       {file.includes('vocals') && (
                         <button
                           onClick={async () => {
-                            // Call denoise API
                             const res = await fetch(`/api/denoise/${jobResult.jobId}`, {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
@@ -177,6 +189,18 @@ function App() {
                       )}
                     </div>
                   ))}
+                  <button
+                    onClick={() => handleAnalyze(jobResult.jobId)}
+                    className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition text-sm"
+                  >
+                    Анализировать (BPM/Key)
+                  </button>
+                  {bpmKey && (
+                    <div className="mt-2 text-gray-300">
+                      BPM: <span className="font-bold text-white">{bpmKey.bpm}</span> | 
+                      Key: <span className="font-bold text-white">{bpmKey.key}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
