@@ -81,6 +81,31 @@ function analyzeTrack(jobId) {
     });
 }
 
+// ===== ROCK MODE =====
+function enableRockMode() {
+    if (!window.currentJobId) {
+        alert('Сначала загрузи трек!');
+        return;
+    }
+    // Set model to htdemucs_ft (fine-tuned for rock)
+    const modelSelect = document.getElementById('modelSelect');
+    if (modelSelect) {
+        // Find option with htdemucs_ft or similar
+        for (let i = 0; i < modelSelect.options.length; i++) {
+            if (modelSelect.options[i].value.includes('htdemucs_ft') || modelSelect.options[i].value.includes('rock')) {
+                modelSelect.selectedIndex = i;
+                if (typeof setModel === 'function') setModel(modelSelect.options[i].value);
+                break;
+            }
+        }
+        // If not found, default to first model
+        if (modelSelect.selectedIndex === -1) modelSelect.selectedIndex = 0;
+    }
+    // Set mode to vocals_only for rock vocals
+    if (typeof setMode === 'function') setMode('vocals_only');
+    alert('ROCK MODE ACTIVATED! Model switched to fine-tuned, mode: Vocals Only');
+}
+
 // ===== VOCAL FX FUNCTIONS =====
 function applyVocalFX(jobId, stem, effect) {
     if (!jobId) {

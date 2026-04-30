@@ -22,6 +22,23 @@
             gap: 4px;
             color: #adb5bd;
         }
+        .premium-pulse {
+            animation: pulse 1.5s infinite;
+            box-shadow: 0 0 10px #ff0000, 0 0 20px #ff0000;
+        }
+        .premium-card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
     </style>
 </head>
 <body>
@@ -230,6 +247,13 @@
                                         <p>Регулировка пропорции голос/музыка</p>
                                     </div>
                                 </div>
+                            </div>
+
+                            <!-- Rock Mode Button -->
+                            <div class="d-flex justify-content-center mt-3">
+                                <button class="btn btn-danger btn-lg premium-pulse" onclick="enableRockMode()">
+                                    <i class="bi bi-lightning-charge-fill"></i> ROCK MODE
+                                </button>
                             </div>
 
                             <!-- Vocal Strength Slider (for mix mode) -->
