@@ -1393,16 +1393,38 @@ app.post('/api/denoise/:jobId', validateJobId, validateJobDir, async (req, res) 
     }
 });
 
-// ===== ЗАПУСК =====
+// ===== STATUS & DOWNLOAD API =====
 
+// Получить статус задачи (для поллинга)
+app.get('/api/status/:jobId', validateJobId, (req, res) => {
+    const { jobId } = req.params;
+    if (activeJobs.has(jobId)) {
+        return res.json(activeJobs.get(jobId));
+    }
+    const jobDir = safePath(OUTPUT_DIR, jobId);
+    if (fs.existsSync(jobDir)) {
+        const files = fs.readdirSync(jobDir).filter(f => f.endsWith('.wav'));
+        if (files.length > 0) return res.json({ status: 'completed', jobId, files });
+    }
+    res.json({ status: 'not_found' });
+});
+
+// Скачать файл результата
+app.get('/api/download/:jobId/:filename', validateJobId, (req, res) => {
+    const { jobId, filename } = req.params;
+    const safeFilename = path.basename(filename);
+    if (!/^[a-zA-Z0-9_\-.]+\.wav$/.test(safeFilename)) {
+        return res.status(400).json({ error: 'Invalid filename' });
+    }
+    const filePath = safePath(OUTPUT_DIR, jobId, safeFilename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+    res.download(filePath);
+});
+
+// ===== ЗАПУСК =====
 server.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
     console.log(`🔌 WebSocket ready on ws://localhost:${PORT}`);
     console.log(`🎵 Voice Remover Pro v5.0 - ALL MODELS`);
-    console.log(`📊 Models: fully local Demucs-family catalog, local blends, legacy fallback`);
-    console.log(`🎸 Separation: 2-stem, 4-stem & 6-stem`);
-    console.log(`🎛️ Mixer: Pan, Volume, EQ per stem`);
-    console.log(`✨ Effects: Reverb, Compressor, Chorus, Pitch Shift, Distortion`);
-    console.log(`📁 Formats: MP3, WAV, FLAC, OGG, M4A, AAC, AIFF, WMA, OPUS`);
-    console.log(`🖥️ Platform: ${process.platform}`);
-});
+    console.log(`📊 Models: fully local Demucs-family catalog`);
+});    console.log(`✨ Effects: Reverb, Compressor, Chorus, Pitch Shift, Distortion`);
