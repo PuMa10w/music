@@ -2,6 +2,7 @@ import { useState } from 'react'
 import UploadZone from './components/UploadZone'
 import FileList from './components/FileList'
 import Waveform from './components/Waveform'
+import VideoPreview from './components/VideoPreview'
 import EQ from './components/EQ'
 import { useStore } from './stores/useStore'
 import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl } from './api/api'
@@ -13,6 +14,23 @@ function App() {
   const [processing, setProcessing] = useState(false)
   const [results, setResults] = useState<{ jobId: string, files: string[] } | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Определяем тип первого файла для превью
+  const firstFile = files.length > 0 ? files[0] : null
+  const isVideo = firstFile?.type.startsWith('video/') || false
+  
+  // Создаем URL для локального превью
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  
+  useEffect(() => {
+    if (!firstFile) {
+      setPreviewUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(firstFile)
+    setPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [firstFile])
 
   const handleProcess = async () => {
     if (!files.length) return
@@ -113,6 +131,13 @@ function App() {
         )}
 
         {files.length > 0 && <EQ />}
+
+        {/* Превью: Видео или Аудио волна */}
+        {files.length > 0 && firstFile && (
+          isVideo ? 
+            <VideoPreview file={firstFile} /> : 
+            previewUrl ? <Waveform audioUrl={previewUrl} height={150} /> : null
+        )}
       </main>
     </div>
   )
