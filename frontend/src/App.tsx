@@ -2,6 +2,7 @@ import { useState } from 'react'
 import UploadZone from './components/UploadZone'
 import FileList from './components/FileList'
 import Waveform from './components/Waveform'
+import EQ from './components/EQ'
 import { useStore } from './stores/useStore'
 import { uploadFile, startSeparation } from './api/api'
 
@@ -77,6 +78,8 @@ function App() {
             </button>
           </div>
         )}
+
+        {files.length > 0 && <EQ />}
 
         {audioUrl && (
           <Waveform audioUrl={audioUrl} height={150} />
