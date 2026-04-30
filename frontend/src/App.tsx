@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import ErrorBoundary from './components/ErrorBoundary'
 import UploadZone from './components/UploadZone'
 import UrlInput from './components/UrlInput'
 import LyricsInput from './components/LyricsInput'
@@ -119,210 +120,212 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black p-8">
-      <header className="max-w-6xl mx-auto backdrop-blur-lg bg-white/10 rounded-2xl p-6 shadow-xl border border-white/20 mb-8">
-        <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent">
-          Voice Remover Ultra
-        </h1>
-        <p className="text-gray-300 mt-2">Next-gen stem separation studio</p>
-      </header>
+    <ErrorBoundary>
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black p-8">
+        <header className="max-w-6xl mx-auto backdrop-blur-lg bg-white/10 rounded-2xl p-6 shadow-xl border border-white/20 mb-8">
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent">
+            Voice Remover Ultra
+          </h1>
+          <p className="text-gray-300 mt-2">Next-gen stem separation studio</p>
+        </header>
 
-      <main className="max-w-6xl mx-auto space-y-6">
-        <div className="backdrop-blur-lg bg-white/5 rounded-2xl p-8 border border-white/10">
-          <UploadZone />
-          <UrlInput onDownloadComplete={handleUrlDownloadComplete} />
-          <FileList />
-        </div>
+        <main className="max-w-6xl mx-auto space-y-6">
+          <div className="backdrop-blur-lg bg-white/5 rounded-2xl p-8 border border-white/10">
+            <UploadZone />
+            <UrlInput onDownloadComplete={handleUrlDownloadComplete} />
+            <FileList />
+          </div>
 
-        {files.length > 0 && (
-          <div className="backdrop-blur-lg bg-white/5 rounded-2xl p-6 border border-white/10">
-            <h3 className="text-xl mb-4">Настройки</h3>
-            <div className="flex gap-4 mb-6">
-              {['2stem', '4stem', '6stem'].map(mode => (
-                <button
-                  key={mode}
-                  onClick={() => setMode(mode as any)}
-                  className={`px-4 py-2 rounded-lg transition ${
-                    currentMode === mode
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-white/10 text-gray-300 hover:bg-white/20'
-                  }`}
-                >
-                  {mode}
-                </button>
+          {files.length > 0 && (
+            <div className="backdrop-blur-lg bg-white/5 rounded-2xl p-6 border border-white/10">
+              <h3 className="text-xl mb-4">Настройки</h3>
+              <div className="flex gap-4 mb-6">
+                {['2stem', '4stem', '6stem'].map(mode => (
+                  <button
+                    key={mode}
+                    onClick={() => setMode(mode as any)}
+                    className={`px-4 py-2 rounded-lg transition ${
+                      currentMode === mode
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                    }`}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+
+              {batchProgress && (
+                <div className="mb-4">
+                  <div className="flex justify-between text-sm text-gray-300 mb-1">
+                    <span>Обработка пачки...</span>
+                    <span>{batchProgress.current} / {batchProgress.total}</span>
+                  </div>
+                  <div className="w-full bg-gray-700 rounded-full h-2.5">
+                    <div 
+                      className="bg-gradient-to-r from-purple-600 to-pink-600 h-2.5 rounded-full transition-all duration-300"
+                      style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
+                    ></div>
+                  </div>
+                </div>
+              )}
+
+              <button
+                onClick={handleProcess}
+                disabled={processing}
+                className="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg font-semibold hover:opacity-90 transition disabled:opacity-50"
+              >
+                {processing ? 'ОБРАБОТКА...' : 'ЗАПУСТИТЬ ВСЕ'}
+              </button>
+            </div>
+          )}
+
+          {error && (
+            <div className="backdrop-blur-lg bg-red-500/20 border border-red-500/50 rounded-2xl p-4 text-red-200">
+              Ошибка: {error}
+            </div>
+          )}
+
+          {results && (
+            <div className="backdrop-blur-lg bg-white/5 rounded-2xl p-6 border border-white/10">
+              <h3 className="text-xl mb-4">Результаты</h3>
+              {results.map((jobResult, jobIdx) => (
+                <div key={jobIdx} className="mb-6 last:mb-0">
+                  <h4 className="text-lg text-gray-300 mb-2">Job {jobIdx + 1}</h4>
+                  <div className="flex flex-wrap gap-4">
+                    {jobResult.files.map((file: string) => (
+                      <div key={file} className="flex flex-col gap-2">
+                        <a
+                          href={getDownloadUrl(jobResult.jobId, file)}
+                          download
+                          className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition flex items-center gap-2"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                          </svg>
+                          {file}
+                        </a>
+                        {file.includes('vocals') && (
+                          <button
+                            onClick={async () => {
+                              const res = await fetch(`/api/denoise/${jobResult.jobId}`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ stem: 'vocals', strength: 0.5 })
+                              })
+                              const data = await res.json()
+                              if (data.success) alert('Denoise done! Check ' + data.file)
+                            }}
+                            className="px-3 py-1 text-sm bg-green-600 hover:bg-green-700 rounded-lg transition"
+                          >
+                            Denoise
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => handleAnalyze(jobResult.jobId)}
+                      className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition text-sm"
+                    >
+                      Анализировать (BPM/Key)
+                    </button>
+                    <div className="flex items-center gap-2 mt-4">
+                    <button
+                      onClick={() => handleMaster(jobResult.jobId, 'instrumental')}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition text-sm"
+                    >
+                      🎛️ Master
+                    </button>
+                    
+                    <div className="flex gap-1">
+                      {masteringPresets.map(preset => (
+                        <button
+                          key={preset.name}
+                          onClick={() => {
+                            setMasterLufs(preset.lufs)
+                            handleMaster(jobResult.jobId, 'instrumental')
+                          }}
+                          className={`px-3 py-1 text-xs rounded transition ${
+                            masterLufs === preset.lufs ? 'bg-pink-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                          }`}
+                        >
+                          {preset.name} ({preset.lufs} LUFS)
+                        </button>
+                      ))}
+                    </div>
+                    </div>
+                    {bpmKey && (
+                      <div className="mt-2 text-gray-300">
+                        BPM: <span className="font-bold text-white">{bpmKey.bpm}</span> | 
+                        Key: <span className="font-bold text-white">{bpmKey.key}</span>
+                      </div>
+                    )}
+                    
+                    {/* Karaoke Mode */}
+                    {isVideo && (
+                      <div className="mt-4">
+                        <LyricsInput lyrics={lyrics} setLyrics={setLyrics} />
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            onClick={async () => {
+                              if (!lyrics.trim()) {
+                                setError('Введите текст песни')
+                                return
+                              }
+                              try {
+                                // First save lyrics to a temp file (simplified - in real app, send via API)
+                                const res = await createKaraoke(
+                                  jobResult.jobId, 
+                                  jobResult.files.find(f => f.includes('vocals') || f.includes('instrumental')) || jobResult.files[0], 
+                                  'lyrics.txt'
+                                )
+                                if (res.success) alert('Karaoke video created: ' + res.file)
+                              } catch (e: any) {
+                                setError(e.message || 'Karaoke failed')
+                              }
+                            }}
+                            className="px-4 py-2 bg-pink-600 hover:bg-pink-700 rounded-lg transition text-sm"
+                          >
+                            🎤 Karaoke
+                          </button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                const audioFile = jobResult.files.find(f => f.includes('instrumental')) || jobResult.files[0]
+                                const videoFile = jobResult.files.find(f => f.includes('.mp4') || f.includes('video')) || 'input_video.mp4'
+                                const res = await replaceVideoAudio(jobResult.jobId, videoFile, audioFile)
+                                if (res.success) alert('Audio replaced! Check ' + res.file)
+                              } catch (e: any) {
+                                setError(e.message || 'Replace audio failed')
+                              }
+                            }}
+                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition text-sm"
+                          >
+                            🎬 Replace Audio
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
+          )}
 
-            {batchProgress && (
-              <div className="mb-4">
-                <div className="flex justify-between text-sm text-gray-300 mb-1">
-                  <span>Обработка пачки...</span>
-                  <span>{batchProgress.current} / {batchProgress.total}</span>
-                </div>
-                <div className="w-full bg-gray-700 rounded-full h-2.5">
-                  <div 
-                    className="bg-gradient-to-r from-purple-600 to-pink-600 h-2.5 rounded-full transition-all duration-300"
-                    style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
-                  ></div>
-                </div>
-              </div>
-            )}
+          {files.length > 0 && <EQ />}
 
-            <button
-              onClick={handleProcess}
-              disabled={processing}
-              className="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg font-semibold hover:opacity-90 transition disabled:opacity-50"
-            >
-              {processing ? 'ОБРАБОТКА...' : 'ЗАПУСТИТЬ ВСЕ'}
-            </button>
-          </div>
-        )}
+          {/* Превью: Видео или Аудио волна */}
+          {files.length > 0 && firstFile && (
+            isVideo ? 
+              <VideoPreview file={firstFile} /> : 
+              previewUrl ? <Waveform audioUrl={previewUrl} height={150} /> : null
+          )}
 
-        {error && (
-          <div className="backdrop-blur-lg bg-red-500/20 border border-red-500/50 rounded-2xl p-4 text-red-200">
-            Ошибка: {error}
-          </div>
-        )}
-
-        {results && (
-          <div className="backdrop-blur-lg bg-white/5 rounded-2xl p-6 border border-white/10">
-            <h3 className="text-xl mb-4">Результаты</h3>
-            {results.map((jobResult, jobIdx) => (
-              <div key={jobIdx} className="mb-6 last:mb-0">
-                <h4 className="text-lg text-gray-300 mb-2">Job {jobIdx + 1}</h4>
-                <div className="flex flex-wrap gap-4">
-                  {jobResult.files.map((file: string) => (
-                    <div key={file} className="flex flex-col gap-2">
-                      <a
-                        href={getDownloadUrl(jobResult.jobId, file)}
-                        download
-                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition flex items-center gap-2"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                        </svg>
-                        {file}
-                      </a>
-                      {file.includes('vocals') && (
-                        <button
-                          onClick={async () => {
-                            const res = await fetch(`/api/denoise/${jobResult.jobId}`, {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ stem: 'vocals', strength: 0.5 })
-                            })
-                            const data = await res.json()
-                            if (data.success) alert('Denoise done! Check ' + data.file)
-                          }}
-                          className="px-3 py-1 text-sm bg-green-600 hover:bg-green-700 rounded-lg transition"
-                        >
-                          Denoise
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  <button
-                    onClick={() => handleAnalyze(jobResult.jobId)}
-                    className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition text-sm"
-                  >
-                    Анализировать (BPM/Key)
-                  </button>
-                  <div className="flex items-center gap-2 mt-4">
-                  <button
-                    onClick={() => handleMaster(jobResult.jobId, 'instrumental')}
-                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition text-sm"
-                  >
-                    🎛️ Master
-                  </button>
-                  
-                  <div className="flex gap-1">
-                    {masteringPresets.map(preset => (
-                      <button
-                        key={preset.name}
-                        onClick={() => {
-                          setMasterLufs(preset.lufs)
-                          handleMaster(jobResult.jobId, 'instrumental')
-                        }}
-                        className={`px-3 py-1 text-xs rounded transition ${
-                          masterLufs === preset.lufs ? 'bg-pink-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'
-                        }`}
-                      >
-                        {preset.name} ({preset.lufs} LUFS)
-                      </button>
-                    ))}
-                  </div>
-                  </div>
-                  {bpmKey && (
-                    <div className="mt-2 text-gray-300">
-                      BPM: <span className="font-bold text-white">{bpmKey.bpm}</span> | 
-                      Key: <span className="font-bold text-white">{bpmKey.key}</span>
-                    </div>
-                  )}
-                  
-                  {/* Karaoke Mode */}
-                  {isVideo && (
-                    <div className="mt-4">
-                      <LyricsInput lyrics={lyrics} setLyrics={setLyrics} />
-                      <div className="flex gap-2 mt-2">
-                        <button
-                          onClick={async () => {
-                            if (!lyrics.trim()) {
-                              setError('Введите текст песни')
-                              return
-                            }
-                            try {
-                              // First save lyrics to a temp file (simplified - in real app, send via API)
-                              const res = await createKaraoke(
-                                jobResult.jobId, 
-                                jobResult.files.find(f => f.includes('vocals') || f.includes('instrumental')) || jobResult.files[0], 
-                                'lyrics.txt'
-                              )
-                              if (res.success) alert('Karaoke video created: ' + res.file)
-                            } catch (e: any) {
-                              setError(e.message || 'Karaoke failed')
-                            }
-                          }}
-                          className="px-4 py-2 bg-pink-600 hover:bg-pink-700 rounded-lg transition text-sm"
-                        >
-                          🎤 Karaoke
-                        </button>
-                        <button
-                          onClick={async () => {
-                            try {
-                              const audioFile = jobResult.files.find(f => f.includes('instrumental')) || jobResult.files[0]
-                              const videoFile = jobResult.files.find(f => f.includes('.mp4') || f.includes('video')) || 'input_video.mp4'
-                              const res = await replaceVideoAudio(jobResult.jobId, videoFile, audioFile)
-                              if (res.success) alert('Audio replaced! Check ' + res.file)
-                            } catch (e: any) {
-                              setError(e.message || 'Replace audio failed')
-                            }
-                          }}
-                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition text-sm"
-                        >
-                          🎬 Replace Audio
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {files.length > 0 && <EQ />}
-
-        {/* Превью: Видео или Аудио волна */}
-        {files.length > 0 && firstFile && (
-          isVideo ? 
-            <VideoPreview file={firstFile} /> : 
-            previewUrl ? <Waveform audioUrl={previewUrl} height={150} /> : null
-        )}
-
-        {/* Спектрограмма для превью */}
-        {!isVideo && previewUrl && <Spectrogram audioUrl={previewUrl} />}
-      </main>
-    </div>
+          {/* Спектрограмма для превью */}
+          {!isVideo && previewUrl && <Spectrogram audioUrl={previewUrl} />}
+        </main>
+      </div>
+    </ErrorBoundary>
   )
 }
 
