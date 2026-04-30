@@ -14,6 +14,7 @@ function App() {
   const [processing, setProcessing] = useState(false)
   const [results, setResults] = useState<{ jobId: string, files: string[] } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [batchProgress, setBatchProgress] = useState<{ current: number, total: number } | null>(null)
 
   // Определяем тип первого файла для превью
   const firstFile = files.length > 0 ? files[0] : null
@@ -37,26 +38,38 @@ function App() {
     setProcessing(true)
     setError(null)
     setResults(null)
+    setBatchProgress({ current: 0, total: files.length })
+
+    const overallResults: { jobId: string, files: string[] }[] = []
+
     try {
-      const res = await uploadFile(files[0])
-      if (res.jobId) {
-        const sepRes = await startSeparation(res.jobId, {
-          model: 'modern_ensemble',
-          mode: currentMode,
-          preset: 'default'
-        })
-        // Start polling
-        const data = await pollJobStatus(res.jobId, (status) => {
-          console.log('Status:', status)
-        })
-        if (data.status === 'completed') {
-          setResults({ jobId: res.jobId, files: data.files || [] })
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        setBatchProgress({ current: i + 1, total: files.length })
+        
+        const res = await uploadFile(file)
+        if (res.jobId) {
+          const sepRes = await startSeparation(res.jobId, {
+            model: 'modern_ensemble',
+            mode: currentMode,
+            preset: 'default'
+          })
+          
+          const data = await pollJobStatus(res.jobId, (status) => {
+            console.log(`File ${i+1}/${files.length} status:`, status)
+          })
+
+          if (data.status === 'completed') {
+            overallResults.push({ jobId: res.jobId, files: data.files || [] })
+          }
         }
       }
+      setResults(overallResults.length > 0 ? overallResults : null)
     } catch (e: any) {
       setError(e.message || 'Processing failed')
     } finally {
       setProcessing(false)
+      setBatchProgress(null)
     }
   }
 
