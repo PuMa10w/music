@@ -4,3 +4,4 @@ package-lock.json
 music/config.local.json
 music/__pycache__/
 music/test_tone.wav
+music/venv/
