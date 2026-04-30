@@ -127,3 +127,21 @@ export async function transcribeTrack(jobId: string): Promise<TranscriptionResul
   })
   return res.json()
 }
+
+export interface HarmonicAnalysisResult {
+  success: boolean
+  data: {
+    key: string
+    mode: string
+    tempo: number
+    time_signature: string
+  }
+  message: string
+}
+
+export async function analyzeHarmonic(jobId: string): Promise<HarmonicAnalysisResult> {
+  const res = await fetch(`${API_BASE}/analyze-harmonic/${jobId}`, {
+    method: 'POST'
+  })
+  return res.json()
+}

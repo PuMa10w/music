@@ -10,7 +10,7 @@ import Spectrogram from './components/Spectrogram'
 import EQ from './components/EQ'
 import { useStore } from './stores/useStore'
 import { AnimatePresence, motion } from 'framer-motion'
-import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl, analyzeTrack, masterTrack, replaceVideoAudio } from './api/api'
+import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl, analyzeTrack, masterTrack, replaceVideoAudio, analyzeHarmonic } from './api/api'
 
 function App() {
   const files = useStore(s => s.files)
@@ -21,6 +21,7 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [batchProgress, setBatchProgress] = useState<{ current: number, total: number } | null>(null)
   const [bpmKey, setBpmKey] = useState<{ bpm: number, key: string } | null>(null)
+  const [harmonicData, setHarmonicData] = useState<{ key: string, mode: string, tempo: number } | null>(null)
   const [lyrics, setLyrics] = useState<string>('')
   const [masterLufs, setMasterLufs] = useState<number>(-14.0)
 
@@ -90,6 +91,22 @@ function App() {
       }
     } catch (e: any) {
       setError(e.message || 'Analysis failed')
+    }
+  }
+
+  const handleHarmonicAnalysis = async (jobId: string) => {
+    try {
+      setHarmonicData(null)
+      const data = await analyzeHarmonic(jobId)
+      if (data.success && data.data) {
+        setHarmonicData({
+          key: data.data.key,
+          mode: data.data.mode,
+          tempo: data.data.tempo
+        })
+      }
+    } catch (e: any) {
+      setError(e.message || 'Harmonic analysis failed')
     }
   }
 
@@ -235,6 +252,12 @@ function App() {
                     >
                       Анализировать (BPM/Key)
                     </button>
+                    <button
+                      onClick={() => handleHarmonicAnalysis(jobResult.jobId)}
+                      className="mt-4 ml-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg transition text-sm"
+                    >
+                      🎵 Harmonic Analysis
+                    </button>
                     <div className="flex items-center gap-2 mt-4">
                     <button
                       onClick={() => handleMaster(jobResult.jobId, 'instrumental')}
@@ -264,6 +287,13 @@ function App() {
                       <div className="mt-2 text-gray-300">
                         BPM: <span className="font-bold text-white">{bpmKey.bpm}</span> | 
                         Key: <span className="font-bold text-white">{bpmKey.key}</span>
+                      </div>
+                    )}
+                    {harmonicData && (
+                      <div className="mt-2 text-gray-300">
+                        Key: <span className="font-bold text-white">{harmonicData.key} {harmonicData.mode === 'major' ? '♭' : '♮'}</span> | 
+                        Tempo: <span className="font-bold text-white">{Math.round(harmonicData.tempo)} BPM</span> | 
+                        Mode: <span className="font-bold text-white">{harmonicData.mode}</span>
                       </div>
                     )}
                     

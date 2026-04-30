@@ -285,6 +285,7 @@ const ANALYZE_SCRIPT = path.join(__dirname, 'analyze.py');
 const EFFECTS_SCRIPT = path.join(__dirname, 'effects.py');
 const MODEL_MANAGER = path.join(__dirname, 'model_manager.py');
 const TRANSCRIBE_SCRIPT = path.join(__dirname, 'transcribe.py');
+const HARMONIC_SCRIPT = path.join(__dirname, 'harmonic_analysis.py');
 
 const MODEL_REGISTRY = {
     modern_ensemble: { name: 'Modern AI Ensemble', family: 'Hybrid', badge: 'Recommended', description: 'Fully local blend of available Demucs-family models with no API keys required', stems: ['vocals', 'drums', 'bass', 'other'], backend: 'local-demucs-blend', compact: 'Best local overall quality' },
@@ -1499,6 +1500,75 @@ app.post('/api/transcribe/:jobId', validateJobId, validateJobDir, async (req, re
     } catch (error) {
         console.error('[Transcribe Error]', error);
         res.status(500).json({ error: 'Transcription failed', details: error.message });
+    }
+});
+
+// ===== AI HARMONIC ANALYSIS =====
+app.post('/api/analyze-harmonic/:jobId', validateJobId, validateJobDir, async (req, res) => {
+    try {
+        const { jobId } = req.params;
+        const jobDir = req.jobDir;
+
+        // Find instrumental stem (preferred) or any audio file
+        const files = fs.readdirSync(jobDir);
+        const instrumentalFile = files.find(f => /^instrumental\.(wav|mp3|m4a|ogg|flac)$/i.test(f));
+        const inputFile = instrumentalFile || files.find(f => /\.(mp3|wav|m4a|ogg|flac|mp4|webm|opus|aac)$/i.test(f));
+        
+        if (!inputFile) {
+            return res.status(404).json({ 
+                error: 'No audio file found for harmonic analysis. Please upload or separate a track first.' 
+            });
+        }
+
+        const inputPath = path.join(jobDir, inputFile);
+        
+        // Validate audio file
+        const validation = await validateAudioFile(inputPath);
+        if (!validation.valid) {
+            return res.status(400).json({ error: validation.error });
+        }
+
+        console.log(`[Harmonic Analysis] Starting analysis for job ${jobId} using ${inputFile}`);
+        
+        // Run harmonic analysis script
+        const stdout = await runPythonScript(HARMONIC_SCRIPT, [inputPath]);
+        
+        // Parse JSON output (last line contains JSON)
+        const jsonMatch = stdout.trim().split('\n').pop();
+        const harmonicData = JSON.parse(jsonMatch);
+        
+        if (harmonicData.error) {
+            return res.status(500).json({ error: harmonicData.error });
+        }
+
+        // Save result to job directory
+        const harmonicPath = path.join(jobDir, 'harmonic.json');
+        fs.writeFileSync(harmonicPath, JSON.stringify(harmonicData, null, 2));
+
+        // Add to history
+        addToHistory({
+            id: jobId,
+            action: 'harmonic_analysis',
+            timestamp: new Date().toISOString(),
+            details: { 
+                inputFile, 
+                key: harmonicData.key, 
+                mode: harmonicData.mode, 
+                tempo: harmonicData.tempo 
+            }
+        });
+
+        res.json({ 
+            success: true, 
+            data: harmonicData,
+            message: 'Harmonic analysis completed successfully'
+        });
+    } catch (error) {
+        console.error('[Harmonic Analysis Error]', error);
+        res.status(500).json({ 
+            error: 'Harmonic analysis failed', 
+            details: error.message 
+        });
     }
 });
 
