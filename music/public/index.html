@@ -192,6 +192,43 @@
                                 </div>
                             </div>
 
+                            <!-- New Modes: Vocals Only / Instrumental Only / Mix -->
+                            <div class="mode-options" style="margin-top: 20px;">
+                                <div class="mode-option" data-mode="vocals_only" onclick="setMode('vocals_only')">
+                                    <div class="mode-icon"><i class="bi bi-mic-fill"></i></div>
+                                    <div class="mode-info">
+                                        <h5>ТОЛЬКО ГОЛОС</h5>
+                                        <p>Только вокал, инструментал удален</p>
+                                    </div>
+                                </div>
+                                <div class="mode-option" data-mode="instrumental_only" onclick="setMode('instrumental_only')">
+                                    <div class="mode-icon"><i class="bi bi-music-note-beamed"></i></div>
+                                    <div class="mode-info">
+                                        <h5>ТОЛЬКО МУЗЫКА</h5>
+                                        <p>Только инструментал, голос удален</p>
+                                    </div>
+                                </div>
+                                <div class="mode-option" data-mode="mix" onclick="setMode('mix')">
+                                    <div class="mode-icon"><i class="bi bi-sliders"></i></div>
+                                    <div class="mode-info">
+                                        <h5>СМЕШАТЬ</h5>
+                                        <p>Регулировка пропорции голос/музыка</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Vocal Strength Slider (for mix mode) -->
+                            <div class="settings-panel" id="vocalStrengthPanel" style="display: none; margin-top: 15px;">
+                                <div class="setting-group">
+                                    <label class="setting-label">
+                                        <i class="bi bi-volume-up"></i>
+                                        Сила голоса: <span id="vocalStrengthValue">50</span>%
+                                    </label>
+                                    <input type="range" id="vocalStrength" min="0" max="100" value="50" 
+                                           oninput="document.getElementById('vocalStrengthValue').textContent = this.value; setVocalStrength(this.value);">
+                                </div>
+                            </div>
+
                             <!-- Quality Settings -->
                             <div class="settings-panel">
                                 <div class="setting-group">

@@ -720,7 +720,7 @@ app.post('/api/analyze/:jobId', validateJobId, validateJobDir, async (req, res) 
 app.post('/api/separate/:jobId', validateJobId, validateJobDir, async (req, res) => {
     try {
         const { jobId } = req.params;
-        const { vocalStrength = 1.0, preset = 'default', model = 'demucs' } = req.body;
+        const { vocalStrength = 1.0, preset = 'default', model = 'demucs', mode = 'all' } = req.body;
         const jobDir = req.jobDir;
 
         // Notify start
@@ -742,7 +742,17 @@ app.post('/api/separate/:jobId', validateJobId, validateJobDir, async (req, res)
 
         // Step 2: ML separation
         emitProgress(jobId, 'progress', { step: 'separate', percent: 30, message: `Разделение через ${model}...` });
-        await runPythonScript(STEMS_SCRIPT, [wavPath, jobDir, preset, vocalStrength.toString(), model, '4stem']);
+        // Build args for stems.py with argparse
+        const args = [
+            wavPath, jobDir,
+            '--preset', preset,
+            '--strength', vocalStrength.toString(),
+            '--model', model,
+            '--type', '4stem',
+            '--mode', mode || 'all',
+            '--vocal-strength', (vocalStrength / 100).toString()
+        ];
+        await runPythonScript(STEMS_SCRIPT, args);
 
         // Step 3: Mix instrumental
         emitProgress(jobId, 'progress', { step: 'mix', percent: 70, message: 'Создание инструментала...' });
@@ -799,7 +809,7 @@ app.post('/api/separate/:jobId', validateJobId, validateJobDir, async (req, res)
 app.post('/api/compare/:jobId', validateJobId, validateJobDir, async (req, res) => {
     try {
         const { jobId } = req.params;
-        const { vocalStrength = 1.0, preset = 'default', primaryModel = 'modern_ensemble', secondaryModel = 'demucs' } = req.body;
+        const { vocalStrength = 1.0, preset = 'default', primaryModel = 'modern_ensemble', secondaryModel = 'demucs', mode = 'all' } = req.body;
         const jobDir = req.jobDir;
 
         const files = fs.readdirSync(jobDir);
@@ -822,7 +832,16 @@ app.post('/api/compare/:jobId', validateJobId, validateJobDir, async (req, res) 
         for (const variant of variants) {
             const outDir = path.join(compareRoot, variant.slot);
             fs.mkdirSync(outDir, { recursive: true });
-            await runPythonScript(STEMS_SCRIPT, [wavPath, outDir, preset, vocalStrength.toString(), variant.model, '4stem']);
+            const args = [
+            wavPath, outDir,
+            '--preset', preset,
+            '--strength', vocalStrength.toString(),
+            '--model', variant.model,
+            '--type', '4stem',
+            '--mode', mode || 'all',
+            '--vocal-strength', (vocalStrength / 100).toString()
+        ];
+        await runPythonScript(STEMS_SCRIPT, args);
 
             const vocalsPath = path.join(outDir, 'vocals.wav');
             const instrumentalPath = path.join(outDir, 'instrumental.wav');
@@ -862,7 +881,7 @@ app.post('/api/compare/:jobId', validateJobId, validateJobDir, async (req, res) 
 app.post('/api/stems/:jobId', validateJobId, validateJobDir, async (req, res) => {
     try {
         const { jobId } = req.params;
-        const { preset = 'default', strength = 1.0, model = 'demucs' } = req.body;
+        const { preset = 'default', strength = 1.0, model = 'demucs', mode = 'all' } = req.body;
         const jobDir = req.jobDir;
 
         emitProgress(jobId, 'start', { type: '4stem', model, preset });
@@ -877,7 +896,16 @@ app.post('/api/stems/:jobId', validateJobId, validateJobDir, async (req, res) =>
         await runFfmpeg(['-i', inputPath, '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2', '-y', wavPath]);
 
         emitProgress(jobId, 'progress', { step: 'separate', percent: 30, message: `Разделение на 4 стема (${model})...` });
-        await runPythonScript(STEMS_SCRIPT, [wavPath, jobDir, preset, strength.toString(), model, '4stem']);
+        const args = [
+            wavPath, jobDir,
+            '--preset', preset,
+            '--strength', strength.toString(),
+            '--model', model,
+            '--type', '4stem',
+            '--mode', mode || 'all',
+            '--vocal-strength', (vocalStrength / 100).toString()
+        ];
+        await runPythonScript(STEMS_SCRIPT, args);
 
         emitProgress(jobId, 'progress', { step: 'save', percent: 80, message: 'Сохранение стемов...' });
         const stems = ['vocals', 'drums', 'bass', 'other'];
@@ -901,7 +929,7 @@ app.post('/api/stems/:jobId', validateJobId, validateJobDir, async (req, res) =>
 app.post('/api/stems6/:jobId', validateJobId, validateJobDir, async (req, res) => {
     try {
         const { jobId } = req.params;
-        const { preset = 'default', strength = 1.0, model = 'demucs' } = req.body;
+        const { preset = 'default', strength = 1.0, model = 'demucs', mode = 'all' } = req.body;
         const jobDir = req.jobDir;
 
         emitProgress(jobId, 'start', { type: '6stem', model, preset });
@@ -916,7 +944,16 @@ app.post('/api/stems6/:jobId', validateJobId, validateJobDir, async (req, res) =
         await runFfmpeg(['-i', inputPath, '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2', '-y', wavPath]);
 
         emitProgress(jobId, 'progress', { step: 'separate', percent: 20, message: `Разделение на 6 стемов (${model})...` });
-        await runPythonScript(STEMS_SCRIPT, [wavPath, jobDir, preset, strength.toString(), model, '6stem']);
+        const args = [
+            wavPath, jobDir,
+            '--preset', preset,
+            '--strength', strength.toString(),
+            '--model', model,
+            '--type', '6stem',
+            '--mode', mode || 'all',
+            '--vocal-strength', (vocalStrength / 100).toString()
+        ];
+        await runPythonScript(STEMS_SCRIPT, args);
 
         emitProgress(jobId, 'progress', { step: 'postprocess', percent: 70, message: 'Постобработка (lead/backing vocals, piano)...' });
         emitProgress(jobId, 'progress', { step: 'save', percent: 90, message: 'Сохранение стемов...' });

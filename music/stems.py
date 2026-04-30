@@ -562,7 +562,7 @@ def separate_with_modern(input_path, model_type, **kwargs):
 # Main Separation Function
 # ==========================================
 
-def separate_stems(input_path, output_dir, preset='default', strength=1.0, model='demucs', stem_type='4stem'):
+def separate_stems(input_path, output_dir, preset='default', strength=1.0, model='demucs', stem_type='4stem', mode='all', vocal_strength=1.0):
     """Р“Р»Р°РІРЅР°СЏ С„СѓРЅРєС†РёСЏ СЂР°Р·РґРµР»РµРЅРёСЏ СЃ graceful degradation."""
     try:
         print(f"Р Р°Р·РґРµР»РµРЅРёРµ: РјРѕРґРµР»СЊ={model}, С‚РёРї={stem_type}", flush=True)
@@ -674,7 +674,52 @@ def separate_stems(input_path, output_dir, preset='default', strength=1.0, model
         if stem_type == '6stem':
             result = split_to_6stems(result, sample_rate)
 
-        # РЎРѕС…СЂР°РЅРµРЅРёРµ
+        # Handle modes: vocals_only, instrumental_only, mix
+        if mode == 'vocals_only':
+            # Keep only vocals or lead+backing
+            new_result = {}
+            for stem_name in result:
+                if stem_name in ['vocals', 'lead_vocals', 'backing_vocals']:
+                    new_result[stem_name] = result[stem_name]
+            if not new_result:
+                # Create silence if no vocals found
+                first_key = list(result.keys())[0]
+                new_result = {'vocals': np.zeros_like(result[first_key])}
+            result = new_result
+        elif mode == 'instrumental_only':
+            # Sum all non-vocal stems
+            instrumental = None
+            for stem_name in result:
+                if stem_name not in ['vocals', 'lead_vocals', 'backing_vocals']:
+                    if instrumental is None:
+                        instrumental = result[stem_name].copy()
+                    else:
+                        instrumental += result[stem_name]
+            if instrumental is None:
+                first_key = list(result.keys())[0]
+                instrumental = np.zeros_like(result[first_key])
+            result = {'instrumental': instrumental}
+        elif mode == 'mix':
+            # Mix vocals and instrumental with vocal_strength
+            vocals = None
+            instrumental = None
+            for stem_name in result:
+                data = result[stem_name]
+                if stem_name in ['vocals', 'lead_vocals', 'backing_vocals']:
+                    vocals = data if vocals is None else vocals + data
+                else:
+                    instrumental = data if instrumental is None else instrumental + data
+            
+            if vocals is None:
+                first_key = list(result.keys())[0]
+                vocals = np.zeros_like(result[first_key])
+            if instrumental is None:
+                instrumental = np.zeros_like(list(result.values())[0])
+            
+            mixed = vocals * vocal_strength + instrumental * (1.0 - vocal_strength)
+            result = {'mixed': mixed}
+
+        # Сохранение
         stem_order = ['vocals', 'lead_vocals', 'backing_vocals', 'drums', 'bass', 'piano', 'other', 'instrumental']
         for stem_name in stem_order:
             if stem_name not in result:
@@ -718,18 +763,20 @@ def separate_stems(input_path, output_dir, preset='default', strength=1.0, model
 # ==========================================
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print("РСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ: python stems.py input.wav output_dir [preset] [strength] [model] [type]", flush=True)
-        print("Модели: modern_ensemble, demucs, htdemucs_ft, mdxnet, bandit, melband, scnet, vrnet, openunmix, asteroid, spleeter, ensemble, lalal, uvr5_mdx, uvr5_vr, legacy — все локальные, без API ключей", flush=True)
-        print("РџСЂРµСЃРµС‚С‹: default, pop, rock, rap, jazz, classic, electronic, acoustic", flush=True)
-        print("РўРёРїС‹: 4stem, 6stem (default: 4stem)", flush=True)
-        sys.exit(1)
-
-    input_path = sys.argv[1]
-    output_dir = sys.argv[2]
-    preset = sys.argv[3] if len(sys.argv) > 3 else 'default'
-    strength = float(sys.argv[4]) if len(sys.argv) > 4 else 1.0
-    model = sys.argv[5] if len(sys.argv) > 5 else 'demucs'
-    stem_type = sys.argv[6] if len(sys.argv) > 6 else '4stem'
-
-    separate_stems(input_path, output_dir, preset, strength, model, stem_type)
+    import argparse
+    parser = argparse.ArgumentParser(description='Stem separation with local ML models.')
+    parser.add_argument('input_path', help='Input WAV file')
+    parser.add_argument('output_dir', help='Output directory')
+    parser.add_argument('--preset', default='default', help='Preset: default, pop, rock, etc.')
+    parser.add_argument('--strength', type=float, default=1.0, help='Stem strength multiplier')
+    parser.add_argument('--model', default='demucs', help='Model name')
+    parser.add_argument('--type', default='4stem', help='Stem type: 4stem or 6stem')
+    parser.add_argument('--mode', default='all', choices=['all', 'vocals_only', 'instrumental_only', 'mix'], 
+                        help='Output mode: all stems, only vocals, only instrumental, or mix')
+    parser.add_argument('--vocal-strength', type=float, default=1.0, 
+                        help='Vocal strength in mix mode (0.0 to 1.0)')
+    
+    args = parser.parse_args()
+    
+    separate_stems(args.input_path, args.output_dir, args.preset, args.strength, 
+                   args.model, args.type, args.mode, args.vocal_strength)
