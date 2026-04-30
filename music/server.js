@@ -469,6 +469,34 @@ async function validateAudioFile(filePath) {
     }
 }
 
+async function convertToWav(inputPath, jobDir) {
+    // Если уже WAV — возвращаем как есть
+    if (inputPath.toLowerCase().endsWith('.wav')) {
+        return inputPath;
+    }
+    const baseName = path.basename(inputPath, path.extname(inputPath));
+    const outputPath = path.join(jobDir, `${baseName}.wav`);
+    console.log(`[Convert] Converting ${inputPath} to WAV...`);
+    try {
+        // -vn: только аудио, -acodec pcm_s16le: стандартный WAV, -ar 44100: частота
+        await execPromise(`"${FFMPEG_PATH}" -i "${inputPath}" -vn -acodec pcm_s16le -ar 44100 -y "${outputPath}"`, { 
+            maxBuffer: 500 * 1024 * 1024 
+        });
+        if (fs.existsSync(outputPath)) {
+            // Удаляем оригинал, если конвертация успешна
+            if (inputPath !== outputPath && fs.existsSync(inputPath)) {
+                fs.unlinkSync(inputPath);
+            }
+            return outputPath;
+        } else {
+            throw new Error('Output WAV not created');
+        }
+    } catch (error) {
+        console.error('[Convert] Error:', error.message);
+        throw new Error(`Failed to convert file to WAV: ${error.message}`);
+    }
+}
+
 async function runPythonScript(scriptPath, args) {
     const argsStr = args.map(a => {
         if (isWin && a.includes(' ')) return `"${a}"`;
@@ -540,11 +568,10 @@ const storage = multer.diskStorage({
 const upload = multer({
     storage,
     fileFilter: (req, file, cb) => {
-        const allowed = /\.(mp3|wav|flac|ogg|m4a|mp4|aac|aiff|wma|opus|webm)$/i;
-        if (allowed.test(file.originalname)) cb(null, true);
-        else cb(new Error('Неподдерживаемый формат файла'));
+        // Разрешаем любые файлы, валидацию сделаем через ffprobe
+        cb(null, true);
     },
-    limits: { fileSize: 500 * 1024 * 1024 }
+    limits: { fileSize: 500 * 1024 * 1024 } // Увеличим лимит до 500MB для видео
 });
 
 app.post('/api/upload', upload.single('audio'), async (req, res) => {
@@ -559,16 +586,30 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
         const destPath = path.join(jobDir, safeFilename);
         fs.renameSync(req.file.path, destPath);
 
+        // Конвертация в WAV (если нужно, например, видеофайлы или не-WAV аудио)
+        let finalPath = destPath;
+        let finalFilename = safeFilename;
+        try {
+            finalPath = await convertToWav(destPath, jobDir);
+            if (finalPath !== destPath) {
+                finalFilename = path.basename(finalPath);
+            }
+        } catch (convError) {
+            console.warn('[Upload] Conversion failed, proceeding with original:', convError.message);
+            finalPath = destPath;
+        }
+
         // Валидация аудиофайла
-        const validation = await validateAudioFile(destPath);
+        const validation = await validateAudioFile(finalPath);
         if (!validation.valid) {
             // Удаляем битый файл
-            fs.unlinkSync(destPath);
+            if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+            if (finalPath !== destPath && fs.existsSync(destPath)) fs.unlinkSync(destPath);
             fs.rmdirSync(jobDir);
             return res.status(400).json({ error: validation.error });
         }
 
-        res.json({ jobId, filename: safeFilename, size: req.file.size, info: validation.info });
+        res.json({ jobId, filename: finalFilename, size: req.file.size, info: validation.info });
     } catch (error) {
         res.status(500).json({ error: error.message || 'Ошибка обработки файла' });
     }
@@ -588,15 +629,29 @@ app.post('/api/upload-multiple', upload.array('audios', 10), async (req, res) =>
             const destPath = path.join(jobDir, safeFilename);
             fs.renameSync(file.path, destPath);
 
+            // Конвертация в WAV если нужно
+            let finalPath = destPath;
+            let finalFilename = safeFilename;
+            try {
+                finalPath = await convertToWav(destPath, jobDir);
+                if (finalPath !== destPath) {
+                    finalFilename = path.basename(finalPath);
+                }
+            } catch (convError) {
+                console.warn('[UploadMultiple] Conversion failed for', safeFilename, convError.message);
+                finalPath = destPath;
+            }
+
             // Валидация каждого файла
-            const validation = await validateAudioFile(destPath);
+            const validation = await validateAudioFile(finalPath);
             if (!validation.valid) {
-                fs.unlinkSync(destPath);
+                if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+                if (finalPath !== destPath && fs.existsSync(destPath)) fs.unlinkSync(destPath);
                 fs.rmdirSync(jobDir);
                 errors.push({ filename: safeFilename, error: validation.error });
                 continue;
             }
-            results.push({ jobId, filename: safeFilename, size: file.size, info: validation.info });
+            results.push({ jobId, filename: finalFilename, size: file.size, info: validation.info });
         }
         if (errors.length > 0 && results.length === 0) {
             return res.status(400).json({ error: 'Все файлы не прошли валидацию', details: errors });
