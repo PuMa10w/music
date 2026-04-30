@@ -1,12 +1,39 @@
 import { useState } from 'react'
 import UploadZone from './components/UploadZone'
 import FileList from './components/FileList'
+import Waveform from './components/Waveform'
 import { useStore } from './stores/useStore'
+import { uploadFile, startSeparation } from './api/api'
 
 function App() {
   const files = useStore(s => s.files)
   const currentMode = useStore(s => s.currentMode)
   const setMode = useStore(s => s.setMode)
+  const [processing, setProcessing] = useState(false)
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+
+  const handleProcess = async () => {
+    if (!files.length) return
+    setProcessing(true)
+    try {
+      // Upload first file for demo
+      const res = await uploadFile(files[0])
+      if (res.jobId) {
+        // Start separation
+        const result = await startSeparation(res.jobId, {
+          model: 'modern_ensemble',
+          mode: currentMode,
+          preset: 'default'
+        })
+        console.log('Separation result:', result)
+        // TODO: poll for completion and set audioUrl
+      }
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setProcessing(false)
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black p-8">
@@ -26,7 +53,7 @@ function App() {
         {files.length > 0 && (
           <div className="backdrop-blur-lg bg-white/5 rounded-2xl p-6 border border-white/10">
             <h3 className="text-xl mb-4">Настройки</h3>
-            <div className="flex gap-4">
+            <div className="flex gap-4 mb-6">
               {['2stem', '4stem', '6stem'].map(mode => (
                 <button
                   key={mode}
@@ -41,7 +68,18 @@ function App() {
                 </button>
               ))}
             </div>
+            <button
+              onClick={handleProcess}
+              disabled={processing}
+              className="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg font-semibold hover:opacity-90 transition disabled:opacity-50"
+            >
+              {processing ? 'ОБРАБОТКА...' : 'ЗАПУСТИТЬ'}
+            </button>
           </div>
+        )}
+
+        {audioUrl && (
+          <Waveform audioUrl={audioUrl} height={150} />
         )}
       </main>
     </div>
