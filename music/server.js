@@ -1320,6 +1320,58 @@ function emitProgress(jobId, event, data = {}) {
     io.to(`job:${jobId}`).emit('job:update', progress);
 }
 
+// ===== ANALYSIS (BPM / Key / Genre) =====
+
+app.get('/api/analyze/:jobId', validateJobId, validateJobDir, async (req, res) => {
+    try {
+        const { jobId } = req.params;
+        const jobDir = req.jobDir;
+        const files = fs.readdirSync(jobDir);
+        const inputFile = files.find(f => /\.(mp3|wav|m4a|ogg|flac)$/i.test(f));
+        if (!inputFile) return res.status(404).json({ error: 'Audio not found' });
+
+        const inputPath = path.join(jobDir, inputFile);
+        const PYTHON = 'C:\\Users\\rousl\\AppData\\Local\\Programs\\Python\\Python312\\python.exe';
+        
+        // Анализ через Python (librosa)
+        const script = `
+import librosa
+import json
+import sys
+try:
+    y, sr = librosa.load(r'${inputPath.replace(/\\/g, '\\\\')}', duration=60)
+    tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+    key = librosa.feature.key_cal key(y, sr)
+    print(json.dumps({'bpm': float(tempo[0]) if hasattr(tempo, '__iter__') else float(tempo), 'key': str(key), 'genre': 'Unknown'}))
+except Exception as e:
+    print(json.dumps({'bpm': 120, 'key': 'C', 'genre': 'Unknown', 'error': str(e)}))
+`;
+        const { stdout } = await execPromise(`"${PYTHON}" -c "${script.replace(/"/g, '\\"')}"`);
+        const data = JSON.parse(stdout.trim());
+        res.json(data);
+    } catch (error) {
+        res.status(500).json({ bpm: 0, key: 'N/A', error: error.message });
+    }
+});
+
+// ===== VOCAL FX (Auto-tune, De-reverb, Denoise) =====
+
+app.post('/api/vocal-fx/:jobId', validateJobId, validateJobDir, async (req, res) => {
+    try {
+        const { jobId } = req.params;
+        const { autotune = 0, dereverb = 0, denoise = 0 } = req.body;
+        const jobDir = req.jobDir;
+        
+        // Здесь будет вызов Python для обработки вокала
+        // Пока просто заглушка
+        console.log(`Vocal FX for ${jobId}: autotune=${autotune}, dereverb=${dereverb}, denoise=${denoise}`);
+        
+        res.json({ success: true, message: 'FX applied (stub)' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Очистка завершённых задач из памяти (каждые 5 минут)
 setInterval(() => {
     const now = Date.now();
