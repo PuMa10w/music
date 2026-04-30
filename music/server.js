@@ -284,6 +284,7 @@ const STEMS_SCRIPT = path.join(__dirname, 'stems.py');
 const ANALYZE_SCRIPT = path.join(__dirname, 'analyze.py');
 const EFFECTS_SCRIPT = path.join(__dirname, 'effects.py');
 const MODEL_MANAGER = path.join(__dirname, 'model_manager.py');
+const TRANSCRIBE_SCRIPT = path.join(__dirname, 'transcribe.py');
 
 const MODEL_REGISTRY = {
     modern_ensemble: { name: 'Modern AI Ensemble', family: 'Hybrid', badge: 'Recommended', description: 'Fully local blend of available Demucs-family models with no API keys required', stems: ['vocals', 'drums', 'bass', 'other'], backend: 'local-demucs-blend', compact: 'Best local overall quality' },
@@ -1443,6 +1444,57 @@ app.post('/api/karaoke/:jobId', validateJobId, validateJobDir, async (req, res) 
     } catch (error) {
         console.error('[Karaoke Error]', error);
         res.status(500).json({ error: 'Karaoke generation failed', details: error.message });
+    }
+});
+
+// ===== WHISPER TRANSCRIPTION FOR KARAOKE =====
+app.post('/api/transcribe/:jobId', validateJobId, validateJobDir, async (req, res) => {
+    try {
+        const { jobId } = req.params;
+        const jobDir = req.jobDir;
+
+        // Find vocals stem from separation output
+        const files = fs.readdirSync(jobDir);
+        const vocalsFile = files.find(f => /^vocals\.(wav|mp3|m4a|ogg|flac)$/i.test(f));
+        if (!vocalsFile) {
+            return res.status(404).json({ 
+                error: 'Vocals stem not found. Please separate the track first using /api/separate/:jobId' 
+            });
+        }
+
+        const vocalsPath = path.join(jobDir, vocalsFile);
+        const lyricsPath = path.join(jobDir, 'lyrics.txt');
+
+        // Validate audio file before transcription
+        const validation = await validateAudioFile(vocalsPath);
+        if (!validation.valid) {
+            return res.status(400).json({ error: validation.error });
+        }
+
+        console.log(`[Transcribe] Starting Whisper transcription for job ${jobId}`);
+        await runPythonScript(TRANSCRIBE_SCRIPT, [vocalsPath, lyricsPath]);
+
+        if (!fs.existsSync(lyricsPath)) {
+            return res.status(500).json({ error: 'Transcription failed: lyrics file not created' });
+        }
+
+        // Add to history
+        addToHistory({
+            id: jobId,
+            action: 'transcribe',
+            timestamp: new Date().toISOString(),
+            details: { vocalsFile, lyricsFile: 'lyrics.txt' }
+        });
+
+        res.json({ 
+            success: true, 
+            lyricsFile: 'lyrics.txt', 
+            path: lyricsPath,
+            message: 'Transcription completed successfully'
+        });
+    } catch (error) {
+        console.error('[Transcribe Error]', error);
+        res.status(500).json({ error: 'Transcription failed', details: error.message });
     }
 });
 

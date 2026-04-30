@@ -106,3 +106,10 @@ export async function createKaraoke(jobId: string, videoFile: string, lyricsFile
   })
   return res.json()
 }
+
+export async function transcribeTrack(jobId: string) {
+  const res = await fetch(`${API_BASE}/transcribe/${jobId}`, {
+    method: 'POST'
+  })
+  return res.json()
+}
