@@ -1,131 +1,148 @@
 /**
- * Premium Features for Voice Remover Pro
- * EQ, Spectrogram, BPM/Key Detection, Vocal FX
+ * premium.js - Advanced features for Voice Remover
+ * Contains: Denoise, EQ, Spectrogram
  */
 
-// ===== 10-BAND EQUALIZER =====
+// ===== CONFIGURATION =====
+const EQ_BANDS = [
+    { freq: 32, label: '32Hz' },
+    { freq: 64, label: '64Hz' },
+    { freq: 125, label: '125Hz' },
+    { freq: 250, label: '250Hz' },
+    { freq: 500, label: '500Hz' },
+    { freq: 1000, label: '1kHz' },
+    { freq: 2000, label: '2kHz' },
+    { freq: 4000, label: '4kHz' },
+    { freq: 8000, label: '8kHz' },
+    { freq: 16000, label: '16kHz' }
+];
 
-const PREMIUM_EQ_BANDS = [60, 150, 400, 1000, 2400, 6000, 15000, 40000, 100000, 200000]; // Hz
-let premiumEqBandsState = Array(10).fill(0); // Gain in dB
+let denoiseStrength = 0.5;
+let eqValues = {};
 
-function initPremiumEQ() {
-    const container = document.getElementById('eqContainer');
+// ===== INITIALIZATION =====
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('[Premium] Features loaded');
+    initEQSliders();
+});
+
+// ===== EQ FUNCTIONS =====
+function initEQSliders() {
+    const container = document.getElementById('eqSliders');
     if (!container) return;
+
     container.innerHTML = '';
-    PREMIUM_EQ_BANDS.forEach((freq, i) => {
-        const col = document.createElement('div');
-        col.className = 'eq-slider-col';
-        col.innerHTML = `
-            <input type="range" min="-12" max="12" value="0" class="eq-slider" orient="vertical" 
-                   id="premiumEqSlider${i}" oninput="updatePremiumEQ(${i}, this.value)">
-            <label class="eq-label">${freq >= 1000 ? (freq/1000)+'k' : freq}</label>
+    EQ_BANDS.forEach(band => {
+        // Default gain 1.0 (0 dB)
+        eqValues[band.freq] = 1.0;
+
+        const sliderWrapper = document.createElement('div');
+        sliderWrapper.className = 'eq-slider-wrapper text-center';
+        sliderWrapper.innerHTML = `
+            <label class="text-muted small">${band.label}</label>
+            <input type="range" min="-12" max="12" value="0" step="0.5" 
+                   class="form-range vertical-range" 
+                   data-freq="${band.freq}"
+                   oninput="updateEQValue(this)">
+            <span id="eqVal_${band.freq}" class="badge bg-secondary small">0</span>
         `;
-        container.appendChild(col);
+        container.appendChild(sliderWrapper);
     });
 }
 
-function updatePremiumEQ(index, value) {
-    premiumEqBandsState[index] = parseInt(value);
-    const slider = document.getElementById('premiumEqSlider' + index);
-    if (slider) slider.style.accentColor = value > 0 ? '#00ff88' : (value < 0 ? '#ff0066' : '#888');
+function updateEQValue(slider) {
+    const freq = parseInt(slider.dataset.freq);
+    const value = parseFloat(slider.value);
+    eqValues[freq] = Math.pow(10, value / 20); // Convert dB to gain multiplier
+    document.getElementById(`eqVal_${freq}`).innerText = value;
 }
 
-function resetPremiumEQ() {
-    premiumEqBandsState = Array(10).fill(0);
-    for (let i = 0; i < 10; i++) {
-        const slider = document.getElementById('premiumEqSlider' + i);
-        if (slider) slider.value = 0;
-    }
-    if (typeof toast === 'function') toast('EQ Reset', 'info');
-}
-
-async function applyPremiumEQ() {
-    if (!currentJob) { 
-        if (typeof toast === 'function') toast('Сначала обработайте трек', 'warning'); 
-        return; 
-    }
-    if (typeof toast === 'function') toast('Applying EQ...', 'info');
-    try {
-        const res = await fetch(`${api()}/api/eq/${currentJob}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ stem: 'vocals', bands: premiumEqBandsState })
-        });
-        if (!res.ok) throw new Error('EQ failed');
-        if (typeof toast === 'function') toast('EQ Applied!', 'success');
-    } catch (e) {
-        if (typeof toast === 'function') toast('EQ Error: ' + e.message, 'error');
-    }
-}
-
-// ===== SPECTROGRAM & ANALYSIS =====
-
-let premiumAudioContext = null;
-let premiumAnalyser = null;
-
-function initPremiumAudioContext() {
-    if (!premiumAudioContext) {
-        premiumAudioContext = new (window.AudioContext || window.webkitAudioContext)();
-        premiumAnalyser = premiumAudioContext.createAnalyser();
-        premiumAnalyser.fftSize = 2048;
-    }
-}
-
-async function analyzeTrackPremium(jobId) {
-    if (!jobId) return;
-    try {
-        const res = await fetch(`${api()}/api/analyze/${jobId}`);
-        const data = await res.json();
-        const bpmEl = document.getElementById('detectedBPM');
-        const keyEl = document.getElementById('detectedKey');
-        const genreEl = document.getElementById('detectedGenre');
-        if (bpmEl) bpmEl.textContent = `BPM: ${data.bpm || '--'}`;
-        if (keyEl) keyEl.textContent = `Key: ${data.key || '--'}`;
-        if (genreEl) genreEl.textContent = `Genre: ${data.genre || '--'}`;
-        drawSpectrogramPremium();
-    } catch (e) {
-        console.error('Analyze error:', e);
-    }
-}
-
-function drawSpectrogramPremium() {
-    const canvas = document.getElementById('spectrogramCanvas');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const width = canvas.width;
-    const height = canvas.height;
-    
-    let time = Date.now() * 0.001;
-    ctx.fillStyle = '#0a0a0a';
-    ctx.fillRect(0, 0, width, height);
-    
-    for (let x = 0; x < width; x += 2) {
-        for (let y = 0; y < height; y += 2) {
-            const value = Math.sin(x * 0.05 + time) * Math.cos(y * 0.02 + time) * 0.5 + 0.5;
-            const g = Math.floor(value * 255);
-            ctx.fillStyle = `rgb(0, ${g}, ${Math.floor(value * 136)})`;
-            ctx.fillRect(x, y, 2, 2);
+function resetEQ() {
+    EQ_BANDS.forEach(band => {
+        const slider = document.querySelector(`input[data-freq="${band.freq}"]`);
+        if (slider) {
+            slider.value = 0;
+            updateEQValue(slider);
         }
-    }
-    requestAnimationFrame(drawSpectrogramPremium);
+    });
 }
 
-// ===== VOCAL FX =====
-
-function setPremiumAutotune(value) {
-    console.log('Autotune set to:', value);
-    if (currentJob && value > 0) {
-        fetch(`${api()}/api/vocal-fx/${currentJob}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ autotune: value, dereverb: 0, denoise: 0 })
-        }).catch(e => console.error(e));
+function applyEQ(jobId) {
+    if (!jobId) {
+        alert('Сначала загрузи и обработай трек!');
+        return;
     }
+
+    // Convert our eqValues to the format expected by server (if it uses gain values)
+    // Assuming server expects gains in dB or linear? Let's send linear as 'params'
+    const params = {};
+    EQ_BANDS.forEach(band => {
+        params[`gain_${band.freq}`] = eqValues[band.freq];
+    });
+
+    fetch(`/api/eq/${jobId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            stem: 'vocals', // Default to vocals
+            params: params
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            alert('EQ применён!');
+        } else {
+            alert('Ошибка EQ: ' + (data.error || 'Unknown'));
+        }
+    })
+    .catch(err => {
+        console.error('[EQ] Error:', err);
+        alert('Ошибка сети при применении EQ');
+    });
 }
 
-// ===== INIT ON LOAD =====
+// ===== DENOISE FUNCTIONS =====
+function applyDenoise(jobId, stem = 'vocals') {
+    if (!jobId) {
+        alert('Сначала загрузи и обработай трек!');
+        return;
+    }
 
-document.addEventListener('DOMContentLoaded', () => {
-    initPremiumEQ();
-    initPremiumAudioContext();
-});
+    const btn = document.getElementById('denoiseBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-gear-fill spin"></i> Обработка...';
+    }
+
+    fetch(`/api/denoise/${jobId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            strength: denoiseStrength,
+            stem: stem
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Шумоподавление готово! Файл: ${data.file}`);
+            const resultDiv = document.getElementById('denoiseResult');
+            if (resultDiv) {
+                resultDiv.innerHTML = `<a href="/uploads/${jobId}/${data.file}" download class="btn btn-success btn-sm">Скачать очищенный (${stem})</a>`;
+            }
+        } else {
+            alert('Ошибка: ' + (data.error || 'Unknown'));
+        }
+    })
+    .catch(err => {
+        console.error('[Denoise] Error:', err);
+        alert('Ошибка сети при денойзе');
+    })
+    .finally(() => {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-play-fill"></i> Применить к вокалу';
+        }
+    });
+}

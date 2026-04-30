@@ -8,6 +8,21 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="style.css" rel="stylesheet">
+    <style>
+        .vertical-range {
+            writing-mode: bt-lr;
+            -webkit-appearance: slider-vertical;
+            width: 8px;
+            height: 120px;
+        }
+        .eq-slider-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            color: #adb5bd;
+        }
+    </style>
 </head>
 <body>
     <!-- Background Effects -->
@@ -749,6 +764,30 @@
                             </div>
 
                             <div class="stems-grid" id="stemsContainer"></div>
+                           
+                           <!-- Denoise Section -->
+                           <div class="premium-card" id="denoiseSection" style="margin-top: 20px; display: none;">
+                               <h5><i class="bi bi-volume-mute-fill"></i> Шумоподавление</h5>
+                               <p class="text-muted">Удаление фонового шума (используя noisereduce)</p>
+                               <div class="d-flex align-items-center gap-3">
+                                   <input type="range" min="0" max="100" value="50" class="form-range" style="width: 200px;" 
+                                          oninput="denoiseStrength = this.value / 100; document.getElementById('denoiseVal').innerText = this.value + '%'">
+                                   <span id="denoiseVal" class="badge bg-primary">50%</span>
+                                   <button id="denoiseBtn" class="btn btn-warning" onclick="applyDenoise(currentJobId, 'vocals')">
+                                       <i class="bi bi-play-fill"></i> Применить к вокалу
+                                   </button>
+                               </div>
+                               <div id="denoiseResult" class="mt-2"></div>
+                           </div>
+
+                           <!-- 10-Band EQ Section -->
+                           <div class="premium-card" id="eqSection" style="margin-top: 20px; display: none;">
+                               <h5><i class="bi bi-sliders"></i> 10-Band Equalizer</h5>
+                               <div id="eqSliders" class="d-flex justify-content-between flex-wrap gap-2">
+                                   <!-- JS сгенерирует ползунки -->
+                               </div>
+                               <button class="btn btn-sm btn-outline-light mt-2" onclick="resetEQ()">Сброс</button>
+                           </div>
 
                             <!-- Multi-Stem Mixer -->
                             <div class="multi-mixer">

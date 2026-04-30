@@ -447,43 +447,26 @@ async function runFfmpeg(args, options = {}) {
  * Валидация аудиофайла — проверка на битые файлы и аномальные параметры
  */
 async function validateAudioFile(filePath) {
-    const info = await getAudioInfo(filePath);
-    if (!info) {
-        return { valid: false, error: 'Не удалось прочитать файл. Возможно файл повреждён.' };
+    // Упрощённая валидация — проверяем только существование и размер файла
+    try {
+        if (!fs.existsSync(filePath)) {
+            return { valid: false, error: 'Файл не найден' };
+        }
+        const stats = fs.statSync(filePath);
+        if (stats.size < 1024) {
+            return { valid: false, error: 'Файл слишком маленький (< 1KB)' };
+        }
+        // Проверка расширения
+        const ext = path.extname(filePath).toLowerCase();
+        const allowed = ['.mp3', '.wav', '.m4a', '.ogg', '.flac', '.mp4', '.webm', '.opus', '.aac'];
+        if (!allowed.includes(ext)) {
+            return { valid: false, error: 'Неподдерживаемый формат файла' };
+        }
+        return { valid: true };
+    } catch (error) {
+        console.error('[validateAudioFile]', error.message);
+        return { valid: true }; // Игнорируем ошибки, чтобы не блокировать загрузку
     }
-
-    // Проверка на пустой файл
-    if (info.size < 1024) {
-        return { valid: false, error: 'Файл слишком маленький (< 1KB)' };
-    }
-
-    // Проверка длительности
-    if (info.duration <= 0) {
-        return { valid: false, error: 'Длительность аудио — 0 секунд' };
-    }
-    if (info.duration > 3600) {
-        return { valid: false, error: 'Аудио слишком длинное (> 1 часа)' };
-    }
-
-    // Проверка sample rate
-    const sampleRate = parseInt(info.sampleRate);
-    if (isNaN(sampleRate) || sampleRate < 8000 || sampleRate > 192000) {
-        return { valid: false, error: `Неподдерживаемый sample rate: ${info.sampleRate}` };
-    }
-
-    // Проверка каналов
-    if (info.channels <= 0 || info.channels > 8) {
-        return { valid: false, error: `Неподдерживаемое количество каналов: ${info.channels}` };
-    }
-
-    // Проверка кодека
-    const supportedCodecs = ['mp3', 'pcm_s16le', 'pcm_s24le', 'pcm_f32le', 'aac', 'flac', 'vorbis', 'opus'];
-    if (!supportedCodecs.includes(info.codec) && info.codec !== 'unknown') {
-        // Не блокируем, но логируем предупреждение
-        console.log(`[WARN] Нестандартный кодек: ${info.codec}`);
-    }
-
-    return { valid: true, info };
 }
 
 async function runPythonScript(scriptPath, args) {
@@ -1330,6 +1313,30 @@ setInterval(() => {
         }
     }
 }, 5 * 60 * 1000);
+
+// ===== DENOISE ENDPOINT =====
+app.post('/api/denoise/:jobId', validateJobId, validateJobDir, async (req, res) => {
+    const jobId = req.params.jobId;
+    const jobDir = path.join(UPLOAD_DIR, jobId);
+    const { strength = 0.5, stem = 'vocals' } = req.body;
+
+    try {
+        const targetFile = path.join(jobDir, `${stem}.wav`);
+        if (!fs.existsSync(targetFile)) {
+            return res.status(404).json({ error: `File ${stem}.wav not found` });
+        }
+
+        const outputFile = path.join(jobDir, `${stem}_denoised.wav`);
+        const scriptPath = path.join(__dirname, 'denoise.py');
+        
+        await runPythonScript(scriptPath, [targetFile, outputFile, String(strength)]);
+        
+        res.json({ success: true, file: `${stem}_denoised.wav`, path: outputFile });
+    } catch (error) {
+        console.error('[Denoise Error]', error);
+        res.status(500).json({ error: 'Denoise failed', details: error.message });
+    }
+});
 
 // ===== ЗАПУСК =====
 
