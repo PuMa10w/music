@@ -28,9 +28,13 @@ function createProgressWebSocket() {
         if (listeners[event]) {
             emitToListeners(event, payload);
         }
-
+        
         // Handle lifecycle events
         if (event === 'complete' || event === 'error') {
+            // Show premium features if job completed successfully
+            if (event === 'complete' && window.showPremiumFeatures) {
+                window.showPremiumFeatures();
+            }
             setTimeout(() => {
                 if (currentJobId === data.jobId) {
                     socket.emit('unsubscribe', currentJobId);
@@ -62,11 +66,12 @@ function createProgressWebSocket() {
     /**
      * Подписаться на обновления задачи
      */
-    function subscribe(jobId) {
-        currentJobId = jobId;
-        socket.emit('subscribe', jobId);
-        console.log(`[WS] Subscribed to job: ${jobId}`);
-    }
+        function subscribe(jobId) {
+            window.currentJobId = jobId; // Expose to other scripts
+            currentJobId = jobId;
+            socket.emit('subscribe', jobId);
+            console.log(`[WS] Subscribed to job: ${jobId}`);
+        }
 
     /**
      * Отписаться от задачи

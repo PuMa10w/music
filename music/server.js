@@ -1159,7 +1159,7 @@ app.post('/api/effect/:jobId', validateJobId, validateJobDir, async (req, res) =
         const jobDir = req.jobDir;
         if (!effect) return res.status(400).json({ error: 'effect обязателен' });
 
-        const validEffects = ['reverb', 'compressor', 'chorus', 'pitchshift', 'distortion'];
+        const validEffects = ['reverb', 'compressor', 'chorus', 'pitchshift', 'distortion', 'autotune', 'dereverb'];
         if (!validEffects.includes(effect)) return res.status(400).json({ error: `Неподдерживаемый эффект: ${validEffects.join(', ')}` });
 
         // Валидация имени стема и параметров

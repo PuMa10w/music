@@ -24,9 +24,68 @@ let eqValues = {};
 document.addEventListener('DOMContentLoaded', () => {
     console.log('[Premium] Features loaded');
     initEQSliders();
+    // Check if job already loaded (e.g. page refresh)
+    if (window.currentJobId) showPremiumFeatures();
 });
 
-// ===== EQ FUNCTIONS =====
+function showPremiumFeatures() {
+    ['eqSection', 'denoiseSection', 'vocalFxSection', 'spectrogramSection'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'block';
+    });
+}
+
+// Make it global for ws-progress.js to call
+window.showPremiumFeatures = showPremiumFeatures;
+
+// ===== VOCAL FX FUNCTIONS =====
+function applyVocalFX(jobId, stem, effect) {
+    if (!jobId) {
+        alert('Сначала загрузи и обработай трек!');
+        return;
+    }
+
+    const btn = event.target.closest('button');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-gear-fill spin"></i> Обработка...';
+    }
+
+    fetch(`/api/effect/${jobId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            stem: stem,
+            effect: effect,
+            params: {}
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.url) {
+            alert(`Эффект ${effect} применён!`);
+            const resultDiv = document.getElementById('vocalFxResult') || document.createElement('div');
+            resultDiv.id = 'vocalFxResult';
+            document.getElementById('vocalFxSection').appendChild(resultDiv);
+            resultDiv.innerHTML = `<a href="${data.url}" download class="btn btn-success btn-sm mt-2">Скачать ${effect}</a>`;
+        } else {
+            alert('Ошибка: ' + (data.error || 'Unknown'));
+        }
+    })
+    .catch(err => {
+        console.error('[VocalFX] Error:', err);
+        alert('Ошибка сети при применении эффекта');
+    })
+    .finally(() => {
+        if (btn) {
+            btn.disabled = false;
+            const icons = { 'autotune': 'bi-soundwave', 'dereverb': 'bi-easel2', 'reverb': 'bi-easel2' };
+            btn.innerHTML = `<i class="bi ${icons[effect] || 'bi-gear'}"></i> ${effect.charAt(0).toUpperCase() + effect.slice(1)}`;
+        }
+    });
+}
+
+// ===== DENOISE FUNCTIONS =====
 function initEQSliders() {
     const container = document.getElementById('eqSliders');
     if (!container) return;
