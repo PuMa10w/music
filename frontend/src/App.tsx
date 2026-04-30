@@ -106,12 +106,28 @@ function App() {
                 </button>
               ))}
             </div>
+
+            {batchProgress && (
+              <div className="mb-4">
+                <div className="flex justify-between text-sm text-gray-300 mb-1">
+                  <span>Обработка пачки...</span>
+                  <span>{batchProgress.current} / {batchProgress.total}</span>
+                </div>
+                <div className="w-full bg-gray-700 rounded-full h-2.5">
+                  <div 
+                    className="bg-gradient-to-r from-purple-600 to-pink-600 h-2.5 rounded-full transition-all duration-300"
+                    style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
+                  ></div>
+                </div>
+              </div>
+            )}
+
             <button
               onClick={handleProcess}
               disabled={processing}
               className="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg font-semibold hover:opacity-90 transition disabled:opacity-50"
             >
-              {processing ? 'ОБРАБОТКА...' : 'ЗАПУСТИТЬ'}
+              {processing ? 'ОБРАБОТКА...' : 'ЗАПУСТИТЬ ВСЕ'}
             </button>
           </div>
         )}
