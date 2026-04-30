@@ -1414,6 +1414,70 @@ app.post('/api/master/:jobId', validateJobId, validateJobDir, async (req, res) =
     }
 });
 
+// ===== KARAOKE MODE =====
+app.post('/api/karaoke/:jobId', validateJobId, validateJobDir, async (req, res) => {
+    const jobId = req.params.jobId;
+    const { videoFile, lyricsFile } = req.body;
+
+    if (!videoFile || !lyricsFile) {
+        return res.status(400).json({ error: 'videoFile and lyricsFile are required' });
+    }
+
+    try {
+        const jobDir = safePath(UPLOAD_DIR, jobId);
+        const inputVideo = path.join(jobDir, videoFile);
+        const inputLyrics = path.join(jobDir, lyricsFile);
+        const outputVideo = path.join(jobDir, `karaoke_${videoFile}`);
+
+        if (!fs.existsSync(inputVideo)) {
+            return res.status(404).json({ error: `Video file ${videoFile} not found` });
+        }
+        if (!fs.existsSync(inputLyrics)) {
+            return res.status(404).json({ error: `Lyrics file ${lyricsFile} not found` });
+        }
+
+        const scriptPath = path.join(__dirname, 'karaoke.py');
+        await runPythonScript(scriptPath, [inputVideo, inputLyrics, outputVideo]);
+
+        res.json({ success: true, file: `karaoke_${videoFile}`, path: outputVideo });
+    } catch (error) {
+        console.error('[Karaoke Error]', error);
+        res.status(500).json({ error: 'Karaoke generation failed', details: error.message });
+    }
+});
+
+// ===== REPLACE AUDIO IN VIDEO =====
+app.post('/api/replace-audio/:jobId', validateJobId, validateJobDir, async (req, res) => {
+    const jobId = req.params.jobId;
+    const { videoFile, audioStem = 'instrumental' } = req.body;
+
+    if (!videoFile) {
+        return res.status(400).json({ error: 'videoFile is required' });
+    }
+
+    try {
+        const jobDir = safePath(UPLOAD_DIR, jobId);
+        const inputVideo = path.join(jobDir, videoFile);
+        const inputAudio = path.join(jobDir, `${audioStem}.wav`);
+        const outputVideo = path.join(jobDir, `video_${audioStem}.mp4`);
+
+        if (!fs.existsSync(inputVideo)) {
+            return res.status(404).json({ error: `Video file ${videoFile} not found` });
+        }
+        if (!fs.existsSync(inputAudio)) {
+            return res.status(404).json({ error: `Audio stem ${audioStem}.wav not found` });
+        }
+
+        const scriptPath = path.join(__dirname, 'replace_audio.py');
+        await runPythonScript(scriptPath, [inputVideo, inputAudio, outputVideo]);
+
+        res.json({ success: true, file: `video_${audioStem}.mp4`, path: outputVideo });
+    } catch (error) {
+        console.error('[Replace Audio Error]', error);
+        res.status(500).json({ error: 'Audio replacement failed', details: error.message });
+    }
+});
+
 // ===== DOWNLOAD EXTERNAL (YouTube, etc.) =====
 app.post('/api/download-external', async (req, res) => {
     const { url } = req.body;

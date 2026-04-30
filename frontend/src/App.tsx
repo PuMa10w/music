@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import UploadZone from './components/UploadZone'
 import UrlInput from './components/UrlInput'
+import LyricsInput from './components/LyricsInput'
 import FileList from './components/FileList'
 import Waveform from './components/Waveform'
 import VideoPreview from './components/VideoPreview'
 import Spectrogram from './components/Spectrogram'
 import EQ from './components/EQ'
 import { useStore } from './stores/useStore'
-import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl, analyzeTrack, masterTrack } from './api/api'
+import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl, analyzeTrack, masterTrack, replaceVideoAudio } from './api/api'
 
 function App() {
   const files = useStore(s => s.files)
@@ -18,6 +19,7 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [batchProgress, setBatchProgress] = useState<{ current: number, total: number } | null>(null)
   const [bpmKey, setBpmKey] = useState<{ bpm: number, key: string } | null>(null)
+  const [lyrics, setLyrics] = useState<string>('')
   const [masterLufs, setMasterLufs] = useState<number>(-14.0)
 
   // Определяем тип первого файла для превью
@@ -254,6 +256,52 @@ function App() {
                     <div className="mt-2 text-gray-300">
                       BPM: <span className="font-bold text-white">{bpmKey.bpm}</span> | 
                       Key: <span className="font-bold text-white">{bpmKey.key}</span>
+                    </div>
+                  )}
+                  
+                  {/* Karaoke Mode */}
+                  {isVideo && (
+                    <div className="mt-4">
+                      <LyricsInput lyrics={lyrics} setLyrics={setLyrics} />
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={async () => {
+                            if (!lyrics.trim()) {
+                              setError('Введите текст песни')
+                              return
+                            }
+                            try {
+                              // First save lyrics to a temp file (simplified - in real app, send via API)
+                              const res = await createKaraoke(
+                                jobResult.jobId, 
+                                jobResult.files.find(f => f.includes('vocals') || f.includes('instrumental')) || jobResult.files[0], 
+                                'lyrics.txt'
+                              )
+                              if (res.success) alert('Karaoke video created: ' + res.file)
+                            } catch (e: any) {
+                              setError(e.message || 'Karaoke failed')
+                            }
+                          }}
+                          className="px-4 py-2 bg-pink-600 hover:bg-pink-700 rounded-lg transition text-sm"
+                        >
+                          🎤 Karaoke
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const audioFile = jobResult.files.find(f => f.includes('instrumental')) || jobResult.files[0]
+                              const videoFile = jobResult.files.find(f => f.includes('.mp4') || f.includes('video')) || 'input_video.mp4'
+                              const res = await replaceVideoAudio(jobResult.jobId, videoFile, audioFile)
+                              if (res.success) alert('Audio replaced! Check ' + res.file)
+                            } catch (e: any) {
+                              setError(e.message || 'Replace audio failed')
+                            }
+                          }}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition text-sm"
+                        >
+                          🎬 Replace Audio
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

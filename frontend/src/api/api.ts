@@ -88,3 +88,21 @@ export async function downloadExternal(url: string) {
   })
   return res.json()
 }
+
+export async function replaceVideoAudio(jobId: string, videoFile: string, audioStem: string = 'instrumental') {
+  const res = await fetch(`${API_BASE}/replace-audio/${jobId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ videoFile, audioStem })
+  })
+  return res.json()
+}
+
+export async function createKaraoke(jobId: string, videoFile: string, lyricsFile: string) {
+  const res = await fetch(`${API_BASE}/karaoke/${jobId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ videoFile, lyricsFile })
+  })
+  return res.json()
+}
