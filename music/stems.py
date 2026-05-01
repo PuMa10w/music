@@ -72,7 +72,7 @@ def main():
         # Пытаемся использовать Demucs
         print("Trying to use Demucs...", flush=True)
         from demucs.separate import main as demucs_main
-        from demucs.pretrained import get_model, load_model
+        from demucs.pretrained import get_model
         
         # Временно меняем аргументы для demucs
         old_argv = sys.argv
