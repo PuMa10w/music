@@ -145,3 +145,20 @@ export async function analyzeHarmonic(jobId: string): Promise<HarmonicAnalysisRe
   })
   return res.json()
 }
+
+export interface MixResult {
+  success: boolean;
+  file?: string;
+  vocalLevel?: number;
+  path?: string;
+  error?: string;
+}
+
+export async function mixStems(jobId: string, vocalLevel: number = 1.0, instrumentalFile?: string, vocalsFile?: string): Promise<MixResult> {
+  const res = await fetch(`${API_BASE}/mix/${jobId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ vocalLevel, instrumentalFile, vocalsFile })
+  })
+  return res.json()
+}

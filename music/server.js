@@ -286,6 +286,7 @@ const EFFECTS_SCRIPT = path.join(__dirname, 'effects.py');
 const MODEL_MANAGER = path.join(__dirname, 'model_manager.py');
 const TRANSCRIBE_SCRIPT = path.join(__dirname, 'transcribe.py');
 const HARMONIC_SCRIPT = path.join(__dirname, 'harmonic_analysis.py');
+const MIX_SCRIPT = path.join(__dirname, 'mix_stems.py');
 
 const MODEL_REGISTRY = {
     modern_ensemble: { name: 'Modern AI Ensemble', family: 'Hybrid', badge: 'Recommended', description: 'Fully local blend of available Demucs-family models with no API keys required', stems: ['vocals', 'drums', 'bass', 'other'], backend: 'local-demucs-blend', compact: 'Best local overall quality' },
@@ -1569,6 +1570,40 @@ app.post('/api/analyze-harmonic/:jobId', validateJobId, validateJobDir, async (r
             error: 'Harmonic analysis failed', 
             details: error.message 
         });
+    }
+});
+
+// ===== MIX STEMS WITH VOCAL REMOVAL LEVEL =====
+app.post('/api/mix/:jobId', validateJobId, validateJobDir, async (req, res) => {
+    const jobId = req.params.jobId;
+    const { vocalLevel = 1.0, instrumentalFile, vocalsFile } = req.body;
+
+    try {
+        const jobDir = safePath(UPLOAD_DIR, jobId);
+        const files = fs.readdirSync(jobDir);
+        
+        const instrumental = instrumentalFile || files.find(f => /^instrumental\.(wav|mp3|m4a|ogg|flac)$/i.test(f));
+        const vocals = vocalsFile || files.find(f => /^vocals\.(wav|mp3|m4a|ogg|flac)$/i.test(f));
+        
+        if (!instrumental || !vocals) {
+            return res.status(404).json({ error: 'Both instrumental and vocals stems are required' });
+        }
+        
+        const inputInstrumental = path.join(jobDir, instrumental);
+        const inputVocals = path.join(jobDir, vocals);
+        const outputFile = path.join(jobDir, `mixed_vocalLevel_${vocalLevel}.wav`);
+        
+        await runPythonScript(MIX_SCRIPT, [inputInstrumental, inputVocals, outputFile, vocalLevel.toString()]);
+        
+        res.json({ 
+            success: true, 
+            file: path.basename(outputFile),
+            vocalLevel,
+            path: outputFile 
+        });
+    } catch (error) {
+        console.error('[Mix Error]', error);
+        res.status(500).json({ error: 'Stem mixing failed', details: error.message });
     }
 });
 

@@ -6,7 +6,7 @@ import LyricsInput from './components/LyricsInput'
 import FileList from './components/FileList'
 import { useStore } from './stores/useStore'
 import { AnimatePresence, motion } from 'framer-motion'
-import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl, analyzeTrack, masterTrack, replaceVideoAudio, analyzeHarmonic } from './api/api'
+import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl, analyzeTrack, masterTrack, replaceVideoAudio, analyzeHarmonic, mixStems } from './api/api'
 import { useToast } from './hooks/useToast'
 import Toast from './components/Toast'
 import SystemStatus from './components/SystemStatus'
@@ -29,6 +29,7 @@ function App() {
   const [harmonicData, setHarmonicData] = useState<{ key: string, mode: string, tempo: number } | null>(null)
   const [lyrics, setLyrics] = useState<string>('')
   const [masterLufs, setMasterLufs] = useState<number>(-14.0)
+  const [vocalLevel, setVocalLevel] = useState<number>(1.0)
   const { toasts, addToast } = useToast()
 
   // Определяем тип первого файла для превью
@@ -330,6 +331,30 @@ function App() {
                         Mode: <span className="font-bold text-white">{harmonicData.mode}</span>
                       </div>
                     )}
+
+                    {/* Vocal Removal Level */}
+                    <div className="mt-4 p-4 bg-black/30 rounded-lg">
+                      <label className="text-sm text-gray-300 mb-2 block">Vocal Removal Level: {vocalLevel}</label>
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max="1" 
+                        step="0.1" 
+                        value={vocalLevel} 
+                        onChange={(e) => setVocalLevel(parseFloat(e.target.value))}
+                        className="w-full accent-purple-500"
+                      />
+                      <button
+                        onClick={async () => {
+                          if (!jobResult) return;
+                          const res = await mixStems(jobResult.jobId, vocalLevel);
+                          if (res.success) addToast(`Mixed: ${res.file}`, 'success');
+                        }}
+                        className="mt-2 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg transition text-sm"
+                      >
+                        🎤 Mix Stems
+                      </button>
+                    </div>
                     
                     {/* Karaoke Mode */}
                     {isVideo && (
