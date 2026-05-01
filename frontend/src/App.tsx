@@ -46,6 +46,32 @@ function App() {
     return () => URL.revokeObjectURL(url)
   }, [firstFile])
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl + Enter: Start processing
+      if (e.ctrlKey && e.key === 'Enter') {
+        e.preventDefault()
+        if (!processing && files.length > 0) handleProcess()
+      }
+      // Escape: Cancel rename or clear errors
+      if (e.key === 'Escape') {
+        if (renamingIndex !== null) {
+          setRenamingIndex(null)
+        }
+        if (error) setError(null)
+      }
+      // Ctrl + U: Focus URL input
+      if (e.ctrlKey && e.key === 'u') {
+        e.preventDefault()
+        const urlInput = document.querySelector('input[placeholder*="YouTube"]') as HTMLInputElement
+        urlInput?.focus()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [processing, files.length, renamingIndex, error])
+
   const handleProcess = async () => {
     if (!files.length) return
     setProcessing(true)
