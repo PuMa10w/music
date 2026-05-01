@@ -150,7 +150,7 @@ function App() {
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5 }}
       >
-        <header className="max-w-6xl mx-auto backdrop-blur-lg bg-white/10 rounded-2xl p-6 shadow-xl border border-white/20 mb-8">
+        <header className="max-w-6xl mx-auto glass-premium rounded-2xl p-6 shadow-xl mb-8">
           <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent">
             Voice Remover Ultra
           </h1>
@@ -158,7 +158,7 @@ function App() {
         </header>
 
         <main className="max-w-6xl mx-auto space-y-6">
-          <div className="backdrop-blur-lg bg-white/5 rounded-2xl p-8 border border-white/10">
+          <div className="glass-premium rounded-2xl p-8">
             <UploadZone />
             <UrlInput onDownloadComplete={handleUrlDownloadComplete} />
             <FileList />
