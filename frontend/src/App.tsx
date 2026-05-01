@@ -8,6 +8,8 @@ import { useStore } from './stores/useStore'
 import { AnimatePresence, motion } from 'framer-motion'
 import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl, analyzeTrack, masterTrack, replaceVideoAudio, analyzeHarmonic, mixStems } from './api/api'
 import { useToast } from './hooks/useToast'
+import { useWebSocket, ProgressData } from './hooks/useWebSocket'
+import { useProcessingHistory } from './hooks/useProcessingHistory'
 import Toast from './components/Toast'
 import SystemStatus from './components/SystemStatus'
 import FirefliesBackground from './components/FirefliesBackground'
@@ -31,6 +33,9 @@ function App() {
   const [masterLufs, setMasterLufs] = useState<number>(-14.0)
   const [vocalLevel, setVocalLevel] = useState<number>(1.0)
   const { toasts, addToast } = useToast()
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null)
+  const { progress: wsProgress, connected: wsConnected } = useWebSocket(currentJobId)
+  const { history, addToHistory, clearHistory } = useProcessingHistory()
 
   // Определяем тип первого файла для превью
   const firstFile = files.length > 0 ? files[0] : null
@@ -91,6 +96,7 @@ function App() {
         
         const res = await uploadFile(file)
         if (res.jobId) {
+          setCurrentJobId(res.jobId) // Start listening to WebSocket for this job
           const sepRes = await startSeparation(res.jobId, {
             model: 'modern_ensemble',
             mode: currentMode,
@@ -101,9 +107,16 @@ function App() {
             console.log(`File ${i+1}/${files.length} status:`, status)
           })
 
-          if (data.status === 'completed') {
-            overallResults.push({ jobId: res.jobId, files: data.files || [] })
-          }
+        if (data.status === 'completed') {
+          overallResults.push({ jobId: res.jobId, files: data.files || [] })
+          addToHistory({
+            jobId: res.jobId,
+            filename: file.name,
+            timestamp: Date.now(),
+            files: data.files || [],
+            mode: currentMode
+          })
+        }
         }
       }
       setResults(overallResults.length > 0 ? overallResults : null)
@@ -112,6 +125,7 @@ function App() {
     } finally {
       setProcessing(false)
       setBatchProgress(null)
+      setCurrentJobId(null) // Clear WebSocket listener
     }
   }
 
@@ -223,6 +237,21 @@ function App() {
                     <div 
                       className="bg-gradient-to-r from-purple-600 to-pink-600 h-2.5 rounded-full transition-all duration-300"
                       style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
+                    ></div>
+                  </div>
+                </div>
+              )}
+
+              {wsProgress && (
+                <div className="mb-4">
+                  <div className="flex justify-between text-sm text-gray-300 mb-1">
+                    <span>WebSocket: {wsProgress.action} - {wsProgress.message}</span>
+                    <span>{wsProgress.percent || 0}%</span>
+                  </div>
+                  <div className="w-full bg-gray-700 rounded-full h-2.5">
+                    <div 
+                      className="bg-gradient-to-r from-green-600 to-blue-600 h-2.5 rounded-full transition-all duration-300"
+                      style={{ width: `${wsProgress.percent || 0}%` }}
                     ></div>
                   </div>
                 </div>
@@ -398,12 +427,60 @@ function App() {
                           >
                             🎬 Replace Audio
                           </button>
+                          <a
+                            href={`/api/download-zip/${jobResult.jobId}`}
+                            download={`${jobResult.jobId}.zip`}
+                            className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition text-sm"
+                          >
+                            📦 Download All as ZIP
+                          </a>
                         </div>
                       </div>
                     )}
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {history.length > 0 && (
+            <div className="backdrop-blur-lg bg-white/5 rounded-2xl p-6 border border-white/10 mt-6">
+              <h3 className="text-xl mb-4">Processing History</h3>
+              <button onClick={clearHistory} className="mb-4 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm">
+                Clear History
+              </button>
+              <div className="space-y-4">
+                {history.map((item: any, index: number) => (
+                  <div key={index} className="p-4 bg-black/30 rounded-lg">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-white font-bold">{item.filename}</span>
+                      <span className="text-gray-400 text-sm">{new Date(item.timestamp).toLocaleString()}</span>
+                    </div>
+                    <div className="text-gray-300 text-sm mb-2">Mode: {item.mode}</div>
+                    <div className="flex flex-wrap gap-2">
+                      {item.files.map((file: string) => (
+                        <a 
+                          key={file}
+                          href={getDownloadUrl(item.jobId, file)}
+                          download
+                          className="px-3 py-1 bg-purple-600 hover:bg-purple-700 rounded text-sm"
+                        >
+                          {file}
+                        </a>
+                      ))}
+                    </div>
+                    <div className="mt-2">
+                      <a
+                        href={`/api/download-zip/${item.jobId}`}
+                        download={`${item.jobId}.zip`}
+                        className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-sm"
+                      >
+                        📦 Download All as ZIP
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
