@@ -14,6 +14,7 @@ import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl, analyzeTrac
 import { useToast } from './hooks/useToast'
 import Toast from './components/Toast'
 import SystemStatus from './components/SystemStatus'
+import FirefliesBackground from './components/FirefliesBackground'
 
 function App() {
   const files = useStore(s => s.files)
@@ -176,6 +177,7 @@ function App() {
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5 }}
       >
+        <FirefliesBackground />
         <header className="max-w-6xl mx-auto glass-premium rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-xl mb-6 sm:mb-8">
           <h1 className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent">
             Voice Remover Ultra
