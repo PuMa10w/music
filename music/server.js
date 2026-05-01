@@ -1804,6 +1804,33 @@ app.get('/api/download/:jobId/:filename', validateJobId, (req, res) => {
     res.download(filePath);
 });
 
+// Скачать все файлы как ZIP
+app.get('/api/download-zip/:jobId', validateJobId, async (req, res) => {
+  const { jobId } = req.params;
+  const jobDir = safePath(OUTPUT_DIR, jobId);
+  
+  if (!fs.existsSync(jobDir)) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+
+  const zipPath = path.join(jobDir, `${jobId}.zip`);
+  const scriptPath = path.join(__dirname, 'zip_job.py');
+
+  try {
+    await runPythonScript(scriptPath, [jobDir, zipPath]);
+
+    if (!fs.existsSync(zipPath)) {
+      return res.status(500).json({ error: 'Failed to create ZIP' });
+    }
+
+    res.download(zipPath, `${jobId}.zip`, (err) => {
+      if (err) console.error('Error sending ZIP:', err);
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'ZIP creation failed' });
+  }
+});
+
 // ===== ЗАПУСК =====
 server.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
