@@ -171,7 +171,7 @@ function App() {
     <ErrorBoundary>
       <Toast toasts={toasts} addToast={addToast} />
       <motion.div 
-        className="min-h-screen bg-gradient-to-br from-gray-900 to-black p-4 sm:p-6 lg:p-8"
+        className="min-h-screen aurora-bg p-4 sm:p-6 lg:p-8"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5 }}
