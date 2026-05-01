@@ -171,19 +171,19 @@ function App() {
     <ErrorBoundary>
       <Toast toasts={toasts} addToast={addToast} />
       <motion.div 
-        className="min-h-screen bg-gradient-to-br from-gray-900 to-black p-8"
+        className="min-h-screen bg-gradient-to-br from-gray-900 to-black p-4 sm:p-6 lg:p-8"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5 }}
       >
-        <header className="max-w-6xl mx-auto glass-premium rounded-2xl p-6 shadow-xl mb-8">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent">
+        <header className="max-w-6xl mx-auto glass-premium rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-xl mb-6 sm:mb-8">
+          <h1 className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent">
             Voice Remover Ultra
           </h1>
-          <p className="text-gray-300 mt-2">Next-gen stem separation studio</p>
+          <p className="text-gray-300 mt-2 text-sm sm:text-base">Next-gen stem separation studio</p>
         </header>
 
-        <main className="max-w-6xl mx-auto space-y-6">
+        <main className="max-w-6xl mx-auto px-0 sm:px-4 space-y-4 sm:space-y-6">
           <div className="glass-premium rounded-2xl p-8">
             <UploadZone />
             <UrlInput onDownloadComplete={handleUrlDownloadComplete} />
