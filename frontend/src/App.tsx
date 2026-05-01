@@ -1,13 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import ErrorBoundary from './components/ErrorBoundary'
 import UploadZone from './components/UploadZone'
 import UrlInput from './components/UrlInput'
 import LyricsInput from './components/LyricsInput'
 import FileList from './components/FileList'
-import Waveform from './components/Waveform'
-import VideoPreview from './components/VideoPreview'
-import Spectrogram from './components/Spectrogram'
-import EQ from './components/EQ'
 import { useStore } from './stores/useStore'
 import { AnimatePresence, motion } from 'framer-motion'
 import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl, analyzeTrack, masterTrack, replaceVideoAudio, analyzeHarmonic } from './api/api'
@@ -15,6 +11,11 @@ import { useToast } from './hooks/useToast'
 import Toast from './components/Toast'
 import SystemStatus from './components/SystemStatus'
 import FirefliesBackground from './components/FirefliesBackground'
+
+const Waveform = lazy(() => import('./components/Waveform'))
+const VideoPreview = lazy(() => import('./components/VideoPreview'))
+const Spectrogram = lazy(() => import('./components/Spectrogram'))
+const EQ = lazy(() => import('./components/EQ'))
 
 function App() {
   const files = useStore(s => s.files)
@@ -383,15 +384,18 @@ function App() {
 
           {files.length > 0 && <EQ />}
 
-          {/* Превью: Видео или Аудио волна */}
-          {files.length > 0 && firstFile && (
-            isVideo ? 
-              <VideoPreview file={firstFile} /> : 
-              previewUrl ? <Waveform audioUrl={previewUrl} height={150} /> : null
-          )}
+          {/* Lazy-loaded components with Suspense */}
+          <Suspense fallback={<div className="text-center p-4 text-gray-400">Loading...</div>}>
+            {/* Preview: Video or Audio wave */}
+            {files.length > 0 && firstFile && (
+              isVideo ? 
+                <VideoPreview file={firstFile} /> : 
+                previewUrl ? <Waveform audioUrl={previewUrl} height={150} /> : null
+            )}
 
-          {/* Спектрограмма для превью */}
-          {!isVideo && previewUrl && <Spectrogram audioUrl={previewUrl} />}
+            {/* Spectrogram for preview */}
+            {!isVideo && previewUrl && <Spectrogram audioUrl={previewUrl} />}
+          </Suspense>
           
           <SystemStatus />
         </main>

@@ -1,0 +1,22 @@
+{
+  "name": "Voice Remover Ultra",
+  "short_name": "VR Ultra",
+  "description": "Next-gen stem separation studio with AI features",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f0f0f",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [],
+  "categories": ["music", "audio", "productivity"],
+  "lang": "ru-RU",
+  "dir": "ltr",
+  "orientation": "any"
+}
