@@ -289,7 +289,7 @@ function App() {
                     >
                       🎵 Harmonic Analysis
                     </button>
-                    <div className="flex items-center gap-2 mt-4">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 space-y-2 sm:space-y-0 mt-4">
                     <button
                       onClick={() => handleMaster(jobResult.jobId, 'instrumental')}
                       className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition text-sm"
@@ -331,7 +331,7 @@ function App() {
                     {/* Karaoke Mode */}
                     {isVideo && (
                       <div className="mt-4">
-                        <LyricsInput lyrics={lyrics} setLyrics={setLyrics} />
+                        <LyricsInput lyrics={lyrics} setLyrics={setLyrics} className="w-full" />
                         <div className="flex gap-2 mt-2">
                           <button
                             onClick={async () => {
