@@ -68,7 +68,7 @@ export default function UrlInput({ onDownloadComplete }: Props) {
         Скачать из интернета
       </h4>
       
-      <div className="flex gap-3">
+      <div className="flex flex-col sm:flex-row gap-3">
         <div className="flex-1 relative">
           <input
             type="text"
@@ -103,7 +103,7 @@ export default function UrlInput({ onDownloadComplete }: Props) {
         <button
           onClick={handleDownload}
           disabled={!isValid || loading}
-          className={`px-6 py-3 rounded-xl font-semibold transition-all duration-300 ${
+          className={`w-full sm:w-auto px-6 py-3 rounded-xl font-semibold transition-all duration-300 ${
             isValid && !loading
               ? 'bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-90 text-white shadow-lg shadow-purple-500/20'
               : 'bg-white/5 text-gray-500 cursor-not-allowed'
