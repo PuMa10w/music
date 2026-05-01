@@ -23,7 +23,7 @@ export default function UploadZone() {
       onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
       onDragLeave={() => setIsDragging(false)}
       onDrop={handleDrop}
-      className={`border-2 border-dashed rounded-2xl p-12 text-center transition-colors ${
+      className={`glass-premium border-2 border-dashed rounded-2xl p-12 text-center transition-colors ${
         isDragging ? 'border-purple-500 bg-purple-500/10' : 'border-gray-600 hover:border-gray-400'
       }`}
     >

@@ -63,7 +63,7 @@ export default function UrlInput({ onDownloadComplete }: Props) {
   }
 
   return (
-    <div className="mt-6 backdrop-blur-2xl bg-white/[0.03] rounded-3xl p-6 border border-white/10 shadow-2xl">
+    <div className="glass-premium mt-6 backdrop-blur-2xl bg-white/[0.03] rounded-3xl p-6 border border-white/10 shadow-2xl">
       <h4 className="text-lg mb-4 bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent font-semibold">
         Скачать из интернета
       </h4>

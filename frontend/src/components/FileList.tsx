@@ -8,7 +8,7 @@ export default function FileList() {
   if (files.length === 0) return null
 
   return (
-    <div className="mt-6 backdrop-blur-lg bg-white/5 rounded-xl p-4 border border-white/10">
+    <div className="glass-premium mt-6 backdrop-blur-lg bg-white/5 rounded-xl p-4 border border-white/10">
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-lg font-semibold">Загруженные файлы ({files.length})</h3>
         <button 
