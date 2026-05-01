@@ -8,6 +8,7 @@ interface AppState {
   eqGains: number[] // 10 bands
   
   setFiles: (files: File[]) => void
+  renameFile: (index: number, newName: string) => void
   setMode: (mode: '2stem' | '4stem' | '6stem') => void
   setPreset: (preset: string) => void
   setModel: (model: string) => void
@@ -25,6 +26,15 @@ export const useStore = create<AppState>((set) => ({
   eqGains: [...defaultGains],
   
   setFiles: (files) => set({ files }),
+  renameFile: (index, newName) => set((state) => {
+    const newFiles = [...state.files]
+    if (index >= 0 && index < newFiles.length) {
+      const file = newFiles[index]
+      const renamedFile = new File([file], newName, { type: file.type })
+      newFiles[index] = renamedFile
+    }
+    return { files: newFiles }
+  }),
   setMode: (mode) => set({ currentMode: mode }),
   setPreset: (preset) => set({ currentPreset: preset }),
   setModel: (model) => set({ selectedModel: model }),
