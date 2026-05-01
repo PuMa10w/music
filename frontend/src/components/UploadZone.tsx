@@ -23,7 +23,7 @@ export default function UploadZone() {
       onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
       onDragLeave={() => setIsDragging(false)}
       onDrop={handleDrop}
-      className={`glass-premium border-2 border-dashed rounded-2xl p-12 text-center transition-colors ${
+      className={`glass-premium border-2 border-dashed rounded-2xl p-4 sm:p-8 text-center transition-colors ${
         isDragging ? 'border-purple-500 bg-purple-500/10' : 'border-gray-600 hover:border-gray-400'
       }`}
     >
@@ -37,7 +37,7 @@ export default function UploadZone() {
       />
       <label htmlFor="fileInput" className="cursor-pointer">
         <div className="text-2xl mb-4">🎵</div>
-        <p className="text-gray-300">Перетащите файлы сюда или нажмите для выбора</p>
+        <p className="text-gray-300 text-sm sm:text-base">Перетащите файлы сюда или нажмите для выбора</p>
         <p className="text-gray-500 text-sm mt-2">Поддерживаются аудио и видео форматы</p>
       </label>
     </div>
