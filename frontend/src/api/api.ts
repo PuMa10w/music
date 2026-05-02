@@ -1,4 +1,10 @@
-const API_BASE = '/api'
+const isLocalFrontend = typeof window !== 'undefined'
+  && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
+
+export const API_BASE = (
+  (import.meta as any).env?.VITE_API_BASE
+  || (isLocalFrontend ? '/api' : 'http://127.0.0.1:8000/api')
+).replace(/\/$/, '')
 
 export interface TimedLyricSegment {
   start: number
@@ -16,13 +22,17 @@ export interface TranscriptionResult {
 
 export async function uploadFile(file: File): Promise<{ jobId: string }> {
   const formData = new FormData()
+  formData.append('audio', file)
   formData.append('file', file)
   
   const res = await fetch(`${API_BASE}/upload`, {
     method: 'POST',
     body: formData
   })
-  if (!res.ok) throw new Error('Upload failed')
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new Error(data?.error || 'Upload failed')
+  }
   return res.json()
 }
 
@@ -42,16 +52,33 @@ export async function startSeparation(jobId: string, params: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params)
   })
-  return res.json()
+  const data = await res.json()
+  if (!res.ok) throw new Error(data?.error || 'Separation failed')
+  return data
 }
 
-export async function checkStatus(jobId: string): Promise<{ status: string, result?: any }> {
+export async function checkStatus(jobId: string): Promise<{ status: string, result?: any, error?: string }> {
   const res = await fetch(`${API_BASE}/status/${jobId}`)
   return res.json()
 }
 
 export function getDownloadUrl(jobId: string, filename: string): string {
   return `${API_BASE}/download/${jobId}/${filename}`
+}
+
+export function getZipUrl(jobId: string): string {
+  return `${API_BASE}/download-zip/${jobId}`
+}
+
+export async function convertFile(jobId: string, filename: string, format: string) {
+  const res = await fetch(`${API_BASE}/convert/${jobId}/${encodeURIComponent(filename)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ format })
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data?.error || 'Conversion failed')
+  return data as { success: boolean, file: string, url: string }
 }
 
 // Поллинг: опрашиваем сервер, пока не будет готово
@@ -61,22 +88,25 @@ export async function pollJobStatus(
   interval = 2000
 ): Promise<any> {
   return new Promise((resolve, reject) => {
-    const timer = setInterval(async () => {
+    let timer: number | undefined
+    const tick = async () => {
       try {
         const data = await checkStatus(jobId)
         onProgress(data.status)
         if (data.status === 'completed') {
-          clearInterval(timer)
+          if (timer) clearInterval(timer)
           resolve(data)
         } else if (data.status === 'error') {
-          clearInterval(timer)
+          if (timer) clearInterval(timer)
           reject(new Error(data.error || 'Processing failed'))
         }
       } catch (e) {
-        clearInterval(timer)
+        if (timer) clearInterval(timer)
         reject(e)
       }
-    }, interval)
+    }
+    tick()
+    timer = window.setInterval(tick, interval)
   })
 }
 
@@ -94,13 +124,26 @@ export async function masterTrack(jobId: string, stem: string = 'instrumental', 
   return res.json()
 }
 
+export async function denoiseTrack(jobId: string, stem: string = 'vocals') {
+  const res = await fetch(`${API_BASE}/denoise/${jobId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stem })
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data?.error || 'Denoise failed')
+  return data as { success: boolean, file: string, url: string }
+}
+
 export async function downloadExternal(url: string) {
   const res = await fetch(`${API_BASE}/download-external`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url })
   })
-  return res.json()
+  const data = await res.json()
+  if (!res.ok) throw new Error(data?.error || 'Download failed')
+  return data
 }
 
 export async function replaceVideoAudio(jobId: string, videoFile: string, audioStem: string = 'instrumental') {

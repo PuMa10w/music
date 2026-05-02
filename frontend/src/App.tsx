@@ -1,49 +1,74 @@
-import { useState, useEffect, lazy, Suspense } from 'react'
+import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
+import { motion } from 'framer-motion'
 import ErrorBoundary from './components/ErrorBoundary'
 import UploadZone from './components/UploadZone'
 import UrlInput from './components/UrlInput'
-import LyricsInput from './components/LyricsInput'
 import FileList from './components/FileList'
-import { useStore } from './stores/useStore'
-import { AnimatePresence, motion } from 'framer-motion'
-import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl, analyzeTrack, masterTrack, replaceVideoAudio, analyzeHarmonic, mixStems } from './api/api'
-import { useToast } from './hooks/useToast'
-import { useWebSocket, ProgressData } from './hooks/useWebSocket'
-import { useProcessingHistory } from './hooks/useProcessingHistory'
 import Toast from './components/Toast'
 import SystemStatus from './components/SystemStatus'
 import FirefliesBackground from './components/FirefliesBackground'
+import { useStore } from './stores/useStore'
+import { useToast } from './hooks/useToast'
+import { useWebSocket } from './hooks/useWebSocket'
+import { useProcessingHistory } from './hooks/useProcessingHistory'
+import {
+  uploadFile,
+  startSeparation,
+  pollJobStatus,
+  getDownloadUrl,
+  getZipUrl,
+  convertFile,
+  analyzeTrack,
+  masterTrack,
+  denoiseTrack,
+  analyzeHarmonic,
+  mixStems,
+} from './api/api'
 
 const Waveform = lazy(() => import('./components/Waveform'))
 const VideoPreview = lazy(() => import('./components/VideoPreview'))
 const Spectrogram = lazy(() => import('./components/Spectrogram'))
 const EQ = lazy(() => import('./components/EQ'))
 
+type StudioTab = 'studio' | 'results' | 'tools' | 'history'
+type ResultRecord = { jobId: string; files: string[]; title?: string }
+
+const tabs: Array<{ id: StudioTab; label: string }> = [
+  { id: 'studio', label: 'Studio' },
+  { id: 'results', label: 'Results' },
+  { id: 'tools', label: 'Tools' },
+  { id: 'history', label: 'History' },
+]
+
 function App() {
   const files = useStore(s => s.files)
   const currentMode = useStore(s => s.currentMode)
   const setMode = useStore(s => s.setMode)
-  const [processing, setProcessing] = useState(false)
-  const [results, setResults] = useState<{ jobId: string, files: string[] } | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [batchProgress, setBatchProgress] = useState<{ current: number, total: number } | null>(null)
-  const [bpmKey, setBpmKey] = useState<{ bpm: number, key: string } | null>(null)
-  const [harmonicData, setHarmonicData] = useState<{ key: string, mode: string, tempo: number } | null>(null)
-  const [lyrics, setLyrics] = useState<string>('')
-  const [masterLufs, setMasterLufs] = useState<number>(-14.0)
-  const [vocalLevel, setVocalLevel] = useState<number>(1.0)
+  const selectedModel = useStore(s => s.selectedModel)
+  const setModel = useStore(s => s.setModel)
   const { toasts, addToast } = useToast()
-  const [currentJobId, setCurrentJobId] = useState<string | null>(null)
-  const { progress: wsProgress, connected: wsConnected } = useWebSocket(currentJobId)
   const { history, addToHistory, clearHistory } = useProcessingHistory()
 
-  // Определяем тип первого файла для превью
-  const firstFile = files.length > 0 ? files[0] : null
-  const isVideo = firstFile?.type.startsWith('video/') || false
-  
-  // Создаем URL для локального превью
+  const [activeTab, setActiveTab] = useState<StudioTab>('studio')
+  const [processing, setProcessing] = useState(false)
+  const [results, setResults] = useState<ResultRecord[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null)
+  const [analysisByJob, setAnalysisByJob] = useState<Record<string, string[]>>({})
+  const [vocalLevel, setVocalLevel] = useState(1)
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  
+  const [modelOptions, setModelOptions] = useState<Array<{ id: string; name: string; family?: string; badge?: string; compact?: string }>>([
+    { id: 'modern_ensemble', name: 'Modern AI Ensemble', family: 'Hybrid', badge: 'Recommended' },
+  ])
+
+  const firstFile = files[0] || null
+  const isVideo = firstFile?.type.startsWith('video/') || false
+  const { progress: wsProgress, connected: wsConnected } = useWebSocket(currentJobId)
+  const activeModel = modelOptions.find(m => m.id === selectedModel) || modelOptions[0]
+
+  const resultCount = useMemo(() => results.reduce((sum, job) => sum + job.files.length, 0), [results])
+
   useEffect(() => {
     if (!firstFile) {
       setPreviewUrl(null)
@@ -54,455 +79,371 @@ function App() {
     return () => URL.revokeObjectURL(url)
   }, [firstFile])
 
-  // Keyboard shortcuts
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl + Enter: Start processing
-      if (e.ctrlKey && e.key === 'Enter') {
-        e.preventDefault()
-        if (!processing && files.length > 0) handleProcess()
-      }
-      // Escape: Cancel rename or clear errors
-      if (e.key === 'Escape') {
-        if (renamingIndex !== null) {
-          setRenamingIndex(null)
-        }
-        if (error) setError(null)
-      }
-      // Ctrl + U: Focus URL input
-      if (e.ctrlKey && e.key === 'u') {
-        e.preventDefault()
-        const urlInput = document.querySelector('input[placeholder*="YouTube"]') as HTMLInputElement
-        urlInput?.focus()
-      }
+    fetch('/api/models')
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (!data || typeof data !== 'object') return
+        const models = Object.entries(data).map(([id, value]: [string, any]) => ({
+          id,
+          name: value?.name || id,
+          family: value?.family,
+          badge: value?.badge,
+          compact: value?.compact,
+        }))
+        setModelOptions(models)
+        if (!models.some(model => model.id === selectedModel)) setModel(models[0]?.id || 'modern_ensemble')
+      })
+      .catch(() => undefined)
+  }, [selectedModel, setModel])
+
+  const mergeResultFile = (jobId: string, file: string) => {
+    setResults(prev => prev.map(job => (
+      job.jobId === jobId && !job.files.includes(file)
+        ? { ...job, files: [...job.files, file] }
+        : job
+    )))
+  }
+
+  const handleSeparateExistingJob = async (jobId: string) => {
+    setProcessing(true)
+    setError(null)
+    setCurrentJobId(jobId)
+    try {
+      await startSeparation(jobId, { model: selectedModel, mode: currentMode, preset: 'default' })
+      const status = await pollJobStatus(jobId, () => undefined, 700)
+      const outputFiles = status.files || []
+      setResults(prev => prev.map(job => job.jobId === jobId ? { ...job, files: outputFiles } : job))
+      addToast('Разделение завершено', 'success')
+      setActiveTab('results')
+    } catch (e: any) {
+      setError(e.message || 'Processing failed')
+    } finally {
+      setProcessing(false)
+      setCurrentJobId(null)
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [processing, files.length, renamingIndex, error])
+  }
 
   const handleProcess = async () => {
     if (!files.length) return
     setProcessing(true)
     setError(null)
-    setResults(null)
+    setResults([])
     setBatchProgress({ current: 0, total: files.length })
 
-    const overallResults: { jobId: string, files: string[] }[] = []
-
+    const completed: ResultRecord[] = []
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
         setBatchProgress({ current: i + 1, total: files.length })
-        
-        const res = await uploadFile(file)
-        if (res.jobId) {
-          setCurrentJobId(res.jobId) // Start listening to WebSocket for this job
-          const sepRes = await startSeparation(res.jobId, {
-            model: 'modern_ensemble',
-            mode: currentMode,
-            preset: 'default'
-          })
-          
-          const data = await pollJobStatus(res.jobId, (status) => {
-            console.log(`File ${i+1}/${files.length} status:`, status)
-          })
-
-        if (data.status === 'completed') {
-          overallResults.push({ jobId: res.jobId, files: data.files || [] })
-          addToHistory({
-            jobId: res.jobId,
-            filename: file.name,
-            timestamp: Date.now(),
-            files: data.files || [],
-            mode: currentMode
-          })
-        }
-        }
+        const upload = await uploadFile(file)
+        setCurrentJobId(upload.jobId)
+        await startSeparation(upload.jobId, { model: selectedModel, mode: currentMode, preset: 'default' })
+        const status = await pollJobStatus(upload.jobId, () => undefined, 700)
+        const outputFiles = status.files || []
+        completed.push({ jobId: upload.jobId, files: outputFiles, title: file.name })
+        addToHistory({ jobId: upload.jobId, filename: file.name, timestamp: Date.now(), files: outputFiles, mode: currentMode })
       }
-      setResults(overallResults.length > 0 ? overallResults : null)
+      setResults(completed)
+      setActiveTab('results')
+      addToast('Файлы обработаны локально', 'success')
     } catch (e: any) {
       setError(e.message || 'Processing failed')
     } finally {
       setProcessing(false)
       setBatchProgress(null)
-      setCurrentJobId(null) // Clear WebSocket listener
+      setCurrentJobId(null)
+    }
+  }
+
+  const handleUrlDownloadComplete = (jobId: string, filename: string) => {
+    setResults(prev => [{ jobId, files: [filename], title: 'Downloaded link' }, ...prev])
+    setActiveTab('results')
+    addToast(`Скачано: ${filename}`, 'success')
+  }
+
+  const handleConvert = async (jobId: string, filename: string, format: string) => {
+    try {
+      const data = await convertFile(jobId, filename, format)
+      mergeResultFile(jobId, data.file)
+      addToast(`Конвертировано: ${data.file}`, 'success')
+    } catch (e: any) {
+      setError(e.message || 'Conversion failed')
     }
   }
 
   const handleAnalyze = async (jobId: string) => {
-    try {
-      setBpmKey(null)
-      const data = await analyzeTrack(jobId)
-      if (data.bpm && data.key) {
-        setBpmKey({ bpm: data.bpm, key: data.key })
-      }
-    } catch (e: any) {
-      setError(e.message || 'Analysis failed')
+    const basic = await analyzeTrack(jobId)
+    const harmonic = await analyzeHarmonic(jobId)
+    const lines = [
+      `BPM: ${basic.bpm || harmonic.data?.tempo || 120}`,
+      `Key: ${basic.key || harmonic.data?.key || 'C'}`,
+      `Mode: ${harmonic.data?.mode || 'major'}`,
+      `Duration: ${Math.round(basic.duration || 0)}s`,
+    ]
+    setAnalysisByJob(prev => ({ ...prev, [jobId]: lines }))
+  }
+
+  const handleMaster = async (jobId: string) => {
+    const data = await masterTrack(jobId, 'instrumental', -14)
+    if (data.success) {
+      mergeResultFile(jobId, data.file)
+      addToast(`Mastered: ${data.file}`, 'success')
+    } else {
+      setError(data.error || 'Mastering failed')
     }
   }
 
-  const handleHarmonicAnalysis = async (jobId: string) => {
-    try {
-      setHarmonicData(null)
-      const data = await analyzeHarmonic(jobId)
-      if (data.success && data.data) {
-        setHarmonicData({
-          key: data.data.key,
-          mode: data.data.mode,
-          tempo: data.data.tempo
-        })
-      }
-    } catch (e: any) {
-      setError(e.message || 'Harmonic analysis failed')
+  const handleDenoise = async (jobId: string) => {
+    const data = await denoiseTrack(jobId, 'vocals')
+    mergeResultFile(jobId, data.file)
+    addToast(`Denoised: ${data.file}`, 'success')
+  }
+
+  const handleMix = async (jobId: string) => {
+    const data = await mixStems(jobId, vocalLevel)
+    if (data.success && data.file) {
+      mergeResultFile(jobId, data.file)
+      addToast(`Mixed: ${data.file}`, 'success')
+    } else {
+      setError(data.error || 'Mix failed')
     }
   }
 
-  const handleMaster = async (jobId: string, stem: string = 'instrumental') => {
-    try {
-      setError(null)
-      const data = await masterTrack(jobId, stem, masterLufs)
-      if (data.success) {
-        addToast('Mastering done! Check ' + data.file, 'success')
-      }
-    } catch (e: any) {
-      setError(e.message || 'Mastering failed')
-    }
-  }
-
-  const masteringPresets = [
-    { name: 'Spotify', lufs: -14.0 },
-    { name: 'YouTube', lufs: -13.0 },
-    { name: 'CD', lufs: -10.0 },
-  ]
-
-  const handleUrlDownloadComplete = (jobId: string, filename: string) => {
-    // Create a mock file object and add to store
-    const mockFile = new File([], filename, { type: 'audio/wav' })
-    // Here you would normally add this to the 'files' state
-    // For simplicity, we just log or alert
-    console.log('Downloaded:', filename, 'JobId:', jobId)
-    addToast(`Скачано: ${filename}. JobId: ${jobId}`, 'success')
-  }
+  const progressPercent = batchProgress ? Math.round((batchProgress.current / batchProgress.total) * 100) : (wsProgress?.percent || 0)
 
   return (
     <ErrorBoundary>
-      <Toast toasts={toasts} addToast={addToast} />
-      <motion.div 
-        className="min-h-screen aurora-bg p-4 sm:p-6 lg:p-8"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.5 }}
-      >
+      <Toast toasts={toasts} />
+      <motion.div className="studio-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }}>
         <FirefliesBackground />
-        <header className="max-w-6xl mx-auto glass-premium rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-xl mb-6 sm:mb-8">
-          <h1 className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent">
-            Voice Remover Ultra
-          </h1>
-          <p className="text-gray-300 mt-2 text-sm sm:text-base">Next-gen stem separation studio</p>
-        </header>
+        <div className="studio-shell">
+          <header className="topbar">
+            <div>
+              <p className="eyebrow">100% local studio</p>
+              <h1>Voice Remover Ultra</h1>
+            </div>
+            <nav className="tabbar" aria-label="Studio navigation">
+              {tabs.map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={activeTab === tab.id ? 'active' : ''}>
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
+          </header>
 
-        <main className="max-w-6xl mx-auto px-0 sm:px-4 space-y-4 sm:space-y-6">
-          <div className="glass-premium rounded-2xl p-8">
-            <UploadZone />
-            <UrlInput onDownloadComplete={handleUrlDownloadComplete} />
-            <FileList />
-          </div>
-
-          {files.length > 0 && (
-            <div className="backdrop-blur-lg bg-white/5 rounded-2xl p-6 border border-white/10">
-              <h3 className="text-xl mb-4">Настройки</h3>
-              <div className="flex gap-4 mb-6">
-                {['2stem', '4stem', '6stem'].map(mode => (
-                  <button
-                    key={mode}
-                    onClick={() => setMode(mode as any)}
-                    className={`px-4 py-2 rounded-lg transition ${
-                      currentMode === mode
-                        ? 'bg-purple-600 text-white'
-                        : 'bg-white/10 text-gray-300 hover:bg-white/20'
-                    }`}
-                  >
-                    {mode}
-                  </button>
+          <section className="hero-console">
+            <div className="hero-copy">
+              <span className="status-badge">Local ffmpeg engine</span>
+              <h2>Разделение вокала, конвертация и скачивание в одном рабочем экране</h2>
+              <p>Файлы обрабатываются на этом компьютере: загрузка, stems, denoise, master, mix, ZIP и экспорт в популярные форматы.</p>
+            </div>
+            <div className="model-card">
+              <div className="section-head">
+                <div>
+                  <p className="eyebrow">Selected model</p>
+                  <h3>{activeModel?.name}</h3>
+                </div>
+                <span className="status-badge">{activeModel?.badge || 'Local'}</span>
+              </div>
+              <p>{activeModel?.compact || 'Local compatible processing profile'}</p>
+              <div className="studio-meter" aria-hidden="true">
+                {[46, 72, 58, 94, 67, 82, 52, 76, 62, 88, 54, 70].map((height, idx) => (
+                  <span key={idx} style={{ height: `${height}%` }} />
                 ))}
               </div>
+            </div>
+          </section>
 
-              {batchProgress && (
-                <div className="mb-4">
-                  <div className="flex justify-between text-sm text-gray-300 mb-1">
-                    <span>Обработка пачки...</span>
-                    <span>{batchProgress.current} / {batchProgress.total}</span>
+          {error && <div className="error-banner">Ошибка: {error}</div>}
+
+          <main className="studio-layout">
+            <section className="workspace">
+              {activeTab === 'studio' && (
+                <>
+                  <div className="studio-panel">
+                    <div className="section-head">
+                      <div>
+                        <p className="eyebrow">Input</p>
+                        <h3>Файлы и ссылки</h3>
+                      </div>
+                      <span>{files.length} selected</span>
+                    </div>
+                    <UploadZone />
+                    <UrlInput onDownloadComplete={handleUrlDownloadComplete} />
+                    <FileList />
                   </div>
-                  <div className="w-full bg-gray-700 rounded-full h-2.5">
-                    <div 
-                      className="bg-gradient-to-r from-purple-600 to-pink-600 h-2.5 rounded-full transition-all duration-300"
-                      style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
-                    ></div>
-                  </div>
-                </div>
+
+                  <Suspense fallback={<div className="studio-panel">Loading preview...</div>}>
+                    {files.length > 0 && <EQ />}
+                    {files.length > 0 && firstFile && (
+                      <div className="studio-panel">
+                        <div className="section-head">
+                          <div>
+                            <p className="eyebrow">Preview</p>
+                            <h3>{isVideo ? 'Video' : 'Waveform'}</h3>
+                          </div>
+                        </div>
+                        {isVideo ? <VideoPreview file={firstFile} /> : previewUrl ? <Waveform audioUrl={previewUrl} height={150} /> : null}
+                        {!isVideo && previewUrl && <Spectrogram audioUrl={previewUrl} />}
+                      </div>
+                    )}
+                  </Suspense>
+                </>
               )}
 
-              {wsProgress && (
-                <div className="mb-4">
-                  <div className="flex justify-between text-sm text-gray-300 mb-1">
-                    <span>WebSocket: {wsProgress.action} - {wsProgress.message}</span>
-                    <span>{wsProgress.percent || 0}%</span>
+              {activeTab === 'results' && (
+                <div className="studio-panel">
+                  <div className="section-head">
+                    <div>
+                      <p className="eyebrow">Output</p>
+                      <h3>Результаты ({resultCount})</h3>
+                    </div>
                   </div>
-                  <div className="w-full bg-gray-700 rounded-full h-2.5">
-                    <div 
-                      className="bg-gradient-to-r from-green-600 to-blue-600 h-2.5 rounded-full transition-all duration-300"
-                      style={{ width: `${wsProgress.percent || 0}%` }}
-                    ></div>
-                  </div>
-                </div>
-              )}
+                  {results.length === 0 && <p className="empty-state">Пока нет результатов. Добавьте файл или ссылку и запустите обработку.</p>}
+                  <div className="result-stack">
+                    {results.map((job, index) => {
+                      const hasVocals = job.files.includes('vocals.wav')
+                      const hasInstrumental = job.files.includes('instrumental.wav')
+                      const hasStems = hasVocals && hasInstrumental
+                      return (
+                      <article key={job.jobId} className="result-job">
+                        <div className="section-head">
+                          <div>
+                            <p className="eyebrow">{job.title || `Job ${index + 1}`}</p>
+                            <h3>{job.jobId.slice(0, 8)}</h3>
+                          </div>
+                          {!hasStems && (
+                            <button onClick={() => handleSeparateExistingJob(job.jobId)} className="secondary-action" disabled={processing}>
+                              Separate
+                            </button>
+                          )}
+                        </div>
 
-              <button
-                onClick={handleProcess}
-                disabled={processing}
-                className="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg font-semibold hover:opacity-90 transition disabled:opacity-50"
-              >
-                {processing ? 'ОБРАБОТКА...' : 'ЗАПУСТИТЬ ВСЕ'}
-              </button>
-            </div>
-          )}
+                        <div className="download-grid">
+                          {job.files.map(file => (
+                            <div key={file} className="download-card">
+                              <strong>{file}</strong>
+                              <a href={getDownloadUrl(job.jobId, file)} download className="primary-action">Download</a>
+                              <div className="format-row">
+                                {['mp3', 'flac', 'ogg', 'm4a', 'wav', 'opus'].map(format => (
+                                  <button key={format} onClick={() => handleConvert(job.jobId, file, format)}>{format}</button>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
 
-          {error && (
-            <div className="backdrop-blur-lg bg-red-500/20 border border-red-500/50 rounded-2xl p-4 text-red-200">
-              Ошибка: {error}
-            </div>
-          )}
+                        <div className="tool-row">
+                          <button onClick={() => handleAnalyze(job.jobId)} className="secondary-action">BPM / Key</button>
+                          {hasVocals && <button onClick={() => handleDenoise(job.jobId)} className="secondary-action">Denoise vocals</button>}
+                          {hasInstrumental && <button onClick={() => handleMaster(job.jobId)} className="secondary-action">Master instrumental</button>}
+                          {hasStems && <button onClick={() => handleMix(job.jobId)} className="secondary-action">Mix stems</button>}
+                          <a href={getZipUrl(job.jobId)} download={`${job.jobId}.zip`} className="secondary-action">Download ZIP</a>
+                        </div>
 
-          {results && (
-            <div className="backdrop-blur-lg bg-white/5 rounded-2xl p-6 border border-white/10">
-              <h3 className="text-xl mb-4">Результаты</h3>
-              {results.map((jobResult, jobIdx) => (
-                <div key={jobIdx} className="mb-6 last:mb-0">
-                  <h4 className="text-lg text-gray-300 mb-2">Job {jobIdx + 1}</h4>
-                  <div className="flex flex-wrap gap-4">
-                    {jobResult.files.map((file: string) => (
-                      <div key={file} className="flex flex-col gap-2">
-                        <a
-                          href={getDownloadUrl(jobResult.jobId, file)}
-                          download
-                          className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition flex items-center gap-2"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                          </svg>
-                          {file}
-                        </a>
-                        {file.includes('vocals') && (
-                          <button
-                            onClick={async () => {
-                              const res = await fetch(`/api/denoise/${jobResult.jobId}`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ stem: 'vocals', strength: 0.5 })
-                              })
-                              const data = await res.json()
-                              if (data.success) addToast('Denoise done! Check ' + data.file, 'success')
-                            }}
-                            className="px-3 py-1 text-sm bg-green-600 hover:bg-green-700 rounded-lg transition"
-                          >
-                            Denoise
-                          </button>
+                        {analysisByJob[job.jobId] && (
+                          <div className="analysis-grid">
+                            {analysisByJob[job.jobId].map(line => <span key={line}>{line}</span>)}
+                          </div>
                         )}
-                      </div>
-                    ))}
-                    <button
-                      onClick={() => handleAnalyze(jobResult.jobId)}
-                      className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition text-sm"
-                    >
-                      Анализировать (BPM/Key)
-                    </button>
-                    <button
-                      onClick={() => handleHarmonicAnalysis(jobResult.jobId)}
-                      className="mt-4 ml-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg transition text-sm"
-                    >
-                      🎵 Harmonic Analysis
-                    </button>
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 space-y-2 sm:space-y-0 mt-4">
-                    <button
-                      onClick={() => handleMaster(jobResult.jobId, 'instrumental')}
-                      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition text-sm"
-                    >
-                      🎛️ Master
-                    </button>
-                    
-                    <div className="flex gap-1">
-                      {masteringPresets.map(preset => (
-                        <button
-                          key={preset.name}
-                          onClick={() => {
-                            setMasterLufs(preset.lufs)
-                            handleMaster(jobResult.jobId, 'instrumental')
-                          }}
-                          className={`px-3 py-1 text-xs rounded transition ${
-                            masterLufs === preset.lufs ? 'bg-pink-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'
-                          }`}
-                        >
-                          {preset.name} ({preset.lufs} LUFS)
-                        </button>
-                      ))}
-                    </div>
-                    </div>
-                    {bpmKey && (
-                      <div className="mt-2 text-gray-300">
-                        BPM: <span className="font-bold text-white">{bpmKey.bpm}</span> | 
-                        Key: <span className="font-bold text-white">{bpmKey.key}</span>
-                      </div>
-                    )}
-                    {harmonicData && (
-                      <div className="mt-2 text-gray-300">
-                        Key: <span className="font-bold text-white">{harmonicData.key} {harmonicData.mode === 'major' ? '♭' : '♮'}</span> | 
-                        Tempo: <span className="font-bold text-white">{Math.round(harmonicData.tempo)} BPM</span> | 
-                        Mode: <span className="font-bold text-white">{harmonicData.mode}</span>
-                      </div>
-                    )}
+                      </article>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
 
-                    {/* Vocal Removal Level */}
-                    <div className="mt-4 p-4 bg-black/30 rounded-lg">
-                      <label className="text-sm text-gray-300 mb-2 block">Vocal Removal Level: {vocalLevel}</label>
-                      <input 
-                        type="range" 
-                        min="0" 
-                        max="1" 
-                        step="0.1" 
-                        value={vocalLevel} 
-                        onChange={(e) => setVocalLevel(parseFloat(e.target.value))}
-                        className="w-full accent-purple-500"
-                      />
-                      <button
-                        onClick={async () => {
-                          if (!jobResult) return;
-                          const res = await mixStems(jobResult.jobId, vocalLevel);
-                          if (res.success) addToast(`Mixed: ${res.file}`, 'success');
-                        }}
-                        className="mt-2 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg transition text-sm"
-                      >
-                        🎤 Mix Stems
-                      </button>
+              {activeTab === 'tools' && (
+                <div className="tools-grid">
+                  {[
+                    ['Vocal remover', '2-stem separation with vocals and instrumental files.'],
+                    ['Stem studio', '4 and 6-stem output profiles for drums, bass, vocals and extras.'],
+                    ['Universal converter', 'WAV, MP3, FLAC, OGG, M4A, OPUS and video containers.'],
+                    ['Link downloader', 'Paste a link; local yt-dlp handles supported services.'],
+                    ['Master / denoise / mix', 'Post-processing tools run from every result card.'],
+                    ['ZIP export', 'One-click archive with all generated files.'],
+                  ].map(([title, text]) => (
+                    <div key={title} className="tool-card">
+                      <h3>{title}</h3>
+                      <p>{text}</p>
                     </div>
-                    
-                    {/* Karaoke Mode */}
-                    {isVideo && (
-                      <div className="mt-4">
-                        <LyricsInput lyrics={lyrics} setLyrics={setLyrics} className="w-full" />
-                        <div className="flex gap-2 mt-2">
-                          <button
-                            onClick={async () => {
-                              if (!lyrics.trim()) {
-                                setError('Введите текст песни')
-                                return
-                              }
-                              try {
-                                // First save lyrics to a temp file (simplified - in real app, send via API)
-                                const res = await createKaraoke(
-                                  jobResult.jobId, 
-                                  jobResult.files.find(f => f.includes('vocals') || f.includes('instrumental')) || jobResult.files[0], 
-                                  'lyrics.txt'
-                                )
-                                if (res.success) addToast('Karaoke video created: ' + res.file, 'success')
-                              } catch (e: any) {
-                                setError(e.message || 'Karaoke failed')
-                              }
-                            }}
-                            className="px-4 py-2 bg-pink-600 hover:bg-pink-700 rounded-lg transition text-sm"
-                          >
-                            🎤 Karaoke
-                          </button>
-                          <button
-                            onClick={async () => {
-                              try {
-                                const audioFile = jobResult.files.find(f => f.includes('instrumental')) || jobResult.files[0]
-                                const videoFile = jobResult.files.find(f => f.includes('.mp4') || f.includes('video')) || 'input_video.mp4'
-                                const res = await replaceVideoAudio(jobResult.jobId, videoFile, audioFile)
-                                if (res.success) addToast('Audio replaced! Check ' + res.file, 'success')
-                              } catch (e: any) {
-                                setError(e.message || 'Replace audio failed')
-                              }
-                            }}
-                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition text-sm"
-                          >
-                            🎬 Replace Audio
-                          </button>
-                          <a
-                            href={`/api/download-zip/${jobResult.jobId}`}
-                            download={`${jobResult.jobId}.zip`}
-                            className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition text-sm"
-                          >
-                            📦 Download All as ZIP
-                          </a>
+                  ))}
+                </div>
+              )}
+
+              {activeTab === 'history' && (
+                <div className="studio-panel">
+                  <div className="section-head">
+                    <div>
+                      <p className="eyebrow">Archive</p>
+                      <h3>История</h3>
+                    </div>
+                    {history.length > 0 && <button onClick={clearHistory} className="ghost-action">Очистить</button>}
+                  </div>
+                  {history.length === 0 && <p className="empty-state">История появится после первой обработки.</p>}
+                  <div className="history-list">
+                    {history.map((item: any, index: number) => (
+                      <div key={`${item.jobId}-${index}`} className="history-row">
+                        <div>
+                          <strong>{item.filename}</strong>
+                          <span>{new Date(item.timestamp).toLocaleString()} | {item.mode}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {item.files.map((file: string) => (
+                            <a key={file} href={getDownloadUrl(item.jobId, file)} download className="mini-action">{file}</a>
+                          ))}
                         </div>
                       </div>
-                    )}
+                    ))}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
+              )}
+            </section>
 
-          {history.length > 0 && (
-            <div className="backdrop-blur-lg bg-white/5 rounded-2xl p-6 border border-white/10 mt-6">
-              <h3 className="text-xl mb-4">Processing History</h3>
-              <button onClick={clearHistory} className="mb-4 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm">
-                Clear History
-              </button>
-              <div className="space-y-4">
-                {history.map((item: any, index: number) => (
-                  <div key={index} className="p-4 bg-black/30 rounded-lg">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-white font-bold">{item.filename}</span>
-                      <span className="text-gray-400 text-sm">{new Date(item.timestamp).toLocaleString()}</span>
-                    </div>
-                    <div className="text-gray-300 text-sm mb-2">Mode: {item.mode}</div>
-                    <div className="flex flex-wrap gap-2">
-                      {item.files.map((file: string) => (
-                        <a 
-                          key={file}
-                          href={getDownloadUrl(item.jobId, file)}
-                          download
-                          className="px-3 py-1 bg-purple-600 hover:bg-purple-700 rounded text-sm"
-                        >
-                          {file}
-                        </a>
-                      ))}
-                    </div>
-                    <div className="mt-2">
-                      <a
-                        href={`/api/download-zip/${item.jobId}`}
-                        download={`${item.jobId}.zip`}
-                        className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-sm"
-                      >
-                        📦 Download All as ZIP
-                      </a>
-                    </div>
+            <aside className="control-rail">
+              <div className="studio-panel sticky-panel">
+                <div className="section-head">
+                  <div>
+                    <p className="eyebrow">Controls</p>
+                    <h3>Processing</h3>
                   </div>
-                ))}
+                </div>
+
+                <div className="segmented">
+                  {(['2stem', '4stem', '6stem'] as const).map(mode => (
+                    <button key={mode} onClick={() => setMode(mode)} className={currentMode === mode ? 'active' : ''}>{mode}</button>
+                  ))}
+                </div>
+
+                <label className="field-label">Local model</label>
+                <select value={selectedModel} onChange={(e) => setModel(e.target.value)} className="studio-input">
+                  {modelOptions.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
+                </select>
+
+                <label className="field-label">Vocal level: {vocalLevel.toFixed(1)}</label>
+                <input type="range" min="0" max="1" step="0.1" value={vocalLevel} onChange={(e) => setVocalLevel(parseFloat(e.target.value))} className="studio-range" />
+
+                {(batchProgress || wsProgress) && (
+                  <div className="progress-card">
+                    <div className="section-head">
+                      <span>{batchProgress ? `${batchProgress.current}/${batchProgress.total}` : (wsConnected ? 'Live' : 'Polling')}</span>
+                      <strong>{progressPercent}%</strong>
+                    </div>
+                    <div className="progress-track"><span style={{ width: `${progressPercent}%` }} /></div>
+                  </div>
+                )}
+
+                <button onClick={handleProcess} disabled={processing || files.length === 0} className="primary-action launch-button">
+                  {processing ? 'Processing...' : files.length ? 'Start local processing' : 'Add a file'}
+                </button>
               </div>
-            </div>
-          )}
-
-          {files.length > 0 && <EQ />}
-
-          {/* Lazy-loaded components with Suspense */}
-          <Suspense fallback={<div className="text-center p-4 text-gray-400">Loading...</div>}>
-            {/* Preview: Video or Audio wave */}
-            {files.length > 0 && firstFile && (
-              isVideo ? 
-                <VideoPreview file={firstFile} /> : 
-                previewUrl ? <Waveform audioUrl={previewUrl} height={150} /> : null
-            )}
-
-            {/* Spectrogram for preview */}
-            {!isVideo && previewUrl && <Spectrogram audioUrl={previewUrl} />}
-          </Suspense>
-          
-          <SystemStatus />
-        </main>
-    </motion.div>
-  </ErrorBoundary>
+            </aside>
+          </main>
+        </div>
+        <SystemStatus />
+      </motion.div>
+    </ErrorBoundary>
   )
 }
 

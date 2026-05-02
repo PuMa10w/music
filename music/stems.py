@@ -24,6 +24,27 @@ import sys
 import json
 import traceback
 
+MODEL_ALIASES = {
+    'modern_ensemble': 'htdemucs_ft',
+    'demucs': 'htdemucs',
+    'htdemucs_ft': 'htdemucs_ft',
+    'htdemucs': 'htdemucs',
+    'mdx': 'mdx_extra',
+    'mdxnet': 'mdx_extra',
+    'vrnet': 'htdemucs_6s',
+    'bandit': 'htdemucs_6s',
+    'melband': 'htdemucs_ft',
+    'scnet': 'htdemucs',
+    'openunmix': 'htdemucs',
+    'asteroid': 'mdx_extra',
+    'spleeter': 'htdemucs',
+    'ensemble': 'htdemucs_ft',
+    'uvr5_mdx': 'mdx_extra',
+    'uvr5_vr': 'htdemucs_6s',
+    'lalal': 'htdemucs_ft',
+    'legacy': 'htdemucs',
+}
+
 def main():
     parser = argparse.ArgumentParser(description='Audio Stem Separation')
     parser.add_argument('input', help='Input WAV file path')
@@ -39,7 +60,10 @@ def main():
     
     input_path = args.input
     output_dir = args.output
-    model_name = args.model
+    requested_model = args.model
+    model_name = MODEL_ALIASES.get(requested_model, requested_model)
+    if args.type == '6stem' and requested_model in ('modern_ensemble', 'ensemble', 'bandit', 'uvr5_vr'):
+        model_name = 'htdemucs_6s'
     mode = args.mode
     vocal_strength = args.vocal_strength
     
@@ -47,7 +71,8 @@ def main():
     print(f"=== STEM SEPARATION ===")
     print(f"Input: {input_path}")
     print(f"Output: {output_dir}")
-    print(f"Model: {model_name}")
+    print(f"Requested Model: {requested_model}")
+    print(f"Runtime Model: {model_name}")
     print(f"Mode: {mode}")
     print(f"Vocal Strength: {vocal_strength}")
     sys.stdout.flush()
@@ -62,7 +87,7 @@ def main():
     
     # Инфо для сервера
     info = {
-        'modelRequested': model_name,
+        'modelRequested': requested_model,
         'modelUsed': model_name,
         'runtimeBackend': model_name,
         'fallbackUsed': False
@@ -165,13 +190,38 @@ def main():
         # Fallback: создаем пустые файлы, чтобы сервер не упал
         import numpy as np
         from scipy.io import wavfile
-        sr = 44100
-        dummy = np.zeros(sr * 10, dtype=np.int16)  # 10 секунд тишины
-        
-        for stem_name in ['vocals', 'drums', 'bass', 'other']:
+        sr, data = wavfile.read(input_path)
+        if data.ndim == 1:
+            mono = data.astype(np.float32)
+            vocals = mono
+            instrumental = np.zeros_like(mono)
+        else:
+            left = data[:, 0].astype(np.float32)
+            right = data[:, 1].astype(np.float32)
+            vocals = (left + right) / 2.0
+            instrumental = (left - right) / 2.0
+
+        if np.issubdtype(data.dtype, np.integer):
+            info = np.iinfo(data.dtype)
+            min_value, max_value = info.min, info.max
+        else:
+            min_value, max_value = -1.0, 1.0
+
+        def as_stereo(signal):
+            clipped = np.clip(signal, min_value, max_value).astype(data.dtype)
+            return np.column_stack([clipped, clipped]) if data.ndim > 1 else clipped
+
+        fallback_stems = {
+            'vocals': as_stereo(vocals),
+            'other': as_stereo(instrumental),
+            'drums': np.zeros_like(data),
+            'bass': np.zeros_like(data),
+        }
+
+        for stem_name, stem_data in fallback_stems.items():
             path = os.path.join(output_dir, f'{stem_name}.wav')
             if not os.path.exists(path):
-                wavfile.write(path, sr, dummy)
+                wavfile.write(path, sr, stem_data)
         
         # Сохраняем инфо об ошибке
         info_path = os.path.join(output_dir, 'stems_info.json')
