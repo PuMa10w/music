@@ -1,12 +1,9 @@
 import { useState } from 'react';
 
-type ToastType = 'success' | 'error'
-type ToastItem = { id: number; msg: string; type: ToastType }
-
 export function useToast() {
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [toasts, setToasts] = useState<Array<{ id: number; msg: string; type: string }>>([]);
   
-  const addToast = (msg: string, type: ToastType) => {
+  const addToast = (msg: string, type: 'success' | 'error') => {
     const id = Date.now();
     setToasts(prev => [...prev, { id, msg, type }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);

@@ -1,3 +1,5 @@
+import React from 'react';
+
 interface ToastItem {
   id: number;
   msg: string;
@@ -6,6 +8,7 @@ interface ToastItem {
 
 interface ToastProps {
   toasts: ToastItem[];
+  addToast: (msg: string, type: 'success' | 'error') => void;
 }
 
 export default function Toast({ toasts }: ToastProps) {

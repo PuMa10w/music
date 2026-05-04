@@ -5,6 +5,3 @@ music/config.local.json
 music/__pycache__/
 music/test_tone.wav
 music/venv/
-music/tmp/
-frontend/tsconfig.tsbuildinfo
-.wrangler/
