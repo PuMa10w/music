@@ -1,41 +1,52 @@
-import { useState, useEffect, lazy, Suspense } from 'react'
+import { useState, useEffect, lazy, Suspense, useRef } from 'react'
 import ErrorBoundary from './components/ErrorBoundary'
 import UploadZone from './components/UploadZone'
 import UrlInput from './components/UrlInput'
-import LyricsInput from './components/LyricsInput'
 import FileList from './components/FileList'
 import { useStore } from './stores/useStore'
 import { AnimatePresence, motion } from 'framer-motion'
-import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl, analyzeTrack, masterTrack, replaceVideoAudio, analyzeHarmonic, mixStems, createKaraoke } from './api/api'
+import { uploadFile, startSeparation, pollJobStatus, getDownloadUrl, analyzeTrack, masterTrack, analyzeHarmonic, mixStems } from './api/api'
 import { useToast } from './hooks/useToast'
-import { useWebSocket, ProgressData } from './hooks/useWebSocket'
+import { useWebSocket } from './hooks/useWebSocket'
 import { useProcessingHistory } from './hooks/useProcessingHistory'
 import Toast from './components/Toast'
 import SystemStatus from './components/SystemStatus'
 import FirefliesBackground from './components/FirefliesBackground'
+import Visualizer3D from './components/Visualizer3D'
+import KaraokeViewer from './components/KaraokeViewer'
 
 const Waveform = lazy(() => import('./components/Waveform'))
-const VideoPreview = lazy(() => import('./components/VideoPreview'))
 const Spectrogram = lazy(() => import('./components/Spectrogram'))
 const EQ = lazy(() => import('./components/EQ'))
+
+type TabType = 'upload' | 'preview' | '3d' | 'karaoke' | 'history'
 
 function App() {
   const files = useStore(s => s.files)
   const currentMode = useStore(s => s.currentMode)
   const setMode = useStore(s => s.setMode)
+  
+  // State
   const [processing, setProcessing] = useState(false)
   const [results, setResults] = useState<{ jobId: string, files: string[] }[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [batchProgress, setBatchProgress] = useState<{ current: number, total: number } | null>(null)
   const [bpmKey, setBpmKey] = useState<{ bpm: number, key: string } | null>(null)
   const [harmonicData, setHarmonicData] = useState<{ key: string, mode: string, tempo: number } | null>(null)
-  const [lyrics, setLyrics] = useState<string>('')
   const [masterLufs, setMasterLufs] = useState<number>(-14.0)
   const [vocalLevel, setVocalLevel] = useState<number>(1.0)
   const { toasts, addToast } = useToast()
   const [currentJobId, setCurrentJobId] = useState<string | null>(null)
-  const { progress: wsProgress, connected: wsConnected } = useWebSocket(currentJobId)
+  const { progress: wsProgress } = useWebSocket(currentJobId)
   const { history, addToHistory, clearHistory } = useProcessingHistory()
+  
+  // New states for 3D, Karaoke, Tabs
+  const [activeTab, setActiveTab] = useState<TabType>('upload')
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null)
+  const [lyrics, setLyrics] = useState<Array<{ start: number, end: number, text: string }>>([])
+  const [currentTime, setCurrentTime] = useState(0)
+  const audioRef = useRef<HTMLAudioElement>(null)
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -47,10 +58,41 @@ function App() {
       if (e.key === 'Escape') {
         if (error) setError(null)
       }
+      // Space to play/pause
+      if (e.key === ' ' && activeTab === 'karaoke') {
+        e.preventDefault()
+        togglePlay()
+      }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [processing, files.length, error])
+  }, [processing, files.length, error, activeTab])
+
+  // Simulate audio progress for karaoke
+  useEffect(() => {
+    if (!isPlaying) return
+    const interval = setInterval(() => {
+      setCurrentTime(prev => {
+        if (prev >= 200) { // Simulate 200 seconds
+          setIsPlaying(false)
+          return 0
+        }
+        return prev + 1
+      })
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [isPlaying])
+
+  const togglePlay = () => {
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause()
+      } else {
+        audioRef.current.play().catch(() => {})
+      }
+      setIsPlaying(!isPlaying)
+    }
+  }
 
   const handleProcess = async () => {
     if (!files.length) return
@@ -94,6 +136,24 @@ function App() {
       setResults(overallResults.length > 0 ? overallResults : null)
       if (overallResults.length > 0) {
         addToast(`✨ Обработано файлов: ${overallResults.length}`, 'success')
+        // Auto-switch to preview tab
+        setActiveTab('preview')
+        // Set first audio for karaoke
+        if (overallResults[0]?.files?.length > 0) {
+          const vocalFile = overallResults[0].files.find(f => f.includes('vocals'))
+          if (vocalFile) {
+            setCurrentAudioUrl(getDownloadUrl(overallResults[0].jobId, vocalFile))
+          }
+          // Mock lyrics for demo
+          setLyrics([
+            { start: 0, end: 10, text: "Караоке режим активирован!" },
+            { start: 10, end: 20, text: "Здесь будут ваши слова" },
+            { start: 20, end: 30, text: "После транскрипции Whisper" },
+            { start: 30, end: 40, text: "Магия происходит прямо сейчас ✨" },
+            { start: 40, end: 50, text: "Вокал удалён, остался инструментал" },
+            { start: 50, end: 60, text: "Наслаждайтесь творчеством!" },
+          ])
+        }
       }
     } catch (e: any) {
       setError(e.message || 'Processing failed')
@@ -170,7 +230,7 @@ function App() {
       >
         <FirefliesBackground />
         
-        {/* HEADER */}
+        {/* HEADER - Mobile Optimized */}
         <motion.header 
           className="max-w-6xl mx-auto mb-8"
           initial={{ y: -50, opacity: 0 }}
@@ -180,16 +240,18 @@ function App() {
           <div className="glass-premium rounded-2xl p-6 sm:p-8 relative overflow-hidden">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
-                <h1 className="header-title gradient-text">
+                <h1 className="header-title gradient-text text-3xl sm:text-4xl">
                   🎵 Voice Remover Ultra
                 </h1>
-                <p className="header-subtitle mt-2">
+                <p className="header-subtitle mt-2 text-sm sm:text-base">
                   Next-gen AI-powered stem separation studio
                 </p>
-                <div className="flex gap-2 mt-3">
+                <div className="flex flex-wrap gap-2 mt-3">
                   <span className="badge">v2.0</span>
                   <span className="badge badge-pink">AI Enhanced</span>
                   <span className="badge badge-blue">Real-time</span>
+                  <span className="badge badge-green hidden sm:inline">3D Visualizer</span>
+                  <span className="badge badge-purple hidden sm:inline">Karaoke</span>
                 </div>
               </div>
               
@@ -200,36 +262,62 @@ function App() {
 
         <main className="max-w-6xl mx-auto px-0 sm:px-4 space-y-6">
           
-          {/* UPLOAD SECTION */}
-          <motion.div
-            className="glass-premium rounded-2xl p-6 sm:p-8"
-            initial={{ y: 30, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.2, duration: 0.6 }}
-          >
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-xl">
-                📤
-              </div>
-              <div>
-                <h2 className="text-xl font-bold text-white">Upload & Process</h2>
-                <p className="text-sm text-gray-400">Drop files or enter URL</p>
-              </div>
+          {/* TAB NAVIGATION - Mobile Scrollable */}
+          <div className="glass-premium rounded-2xl p-2 sm:p-4 overflow-x-auto">
+            <div className="flex gap-2 min-w-max sm:min-w-0 sm:flex-wrap">
+              {([
+                { id: 'upload', icon: '📤', label: 'Upload' },
+                { id: 'preview', icon: '👁️', label: 'Preview' },
+                { id: '3d', icon: '🎧', label: '3D Viz' },
+                { id: 'karaoke', icon: '🎤', label: 'Karaoke' },
+                { id: 'history', icon: '📊', label: 'History' },
+              ] as { id: TabType, icon: string, label: string }[]).map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`px-4 py-2 sm:px-6 sm:py-3 rounded-xl font-semibold transition-all duration-300 flex items-center gap-2 ${
+                    activeTab === tab.id
+                      ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg scale-105'
+                      : 'bg-white/5 text-gray-300 hover:bg-white/10'
+                  }`}
+                >
+                  <span className="text-lg">{tab.icon}</span>
+                  <span className="hidden sm:inline">{tab.label}</span>
+                </button>
+              ))}
             </div>
-            
-            <UploadZone />
-            <div className="my-6 border-t border-white/5"></div>
-            <UrlInput />
-            <FileList />
-          </motion.div>
+          </div>
 
-          {/* SETTINGS SECTION */}
-          {files.length > 0 && (
+          {/* UPLOAD TAB */}
+          {activeTab === 'upload' && (
             <motion.div
               className="glass-premium rounded-2xl p-6 sm:p-8"
-              initial={{ y: 30, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.3, duration: 0.6 }}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-xl">
+                  📤
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white">Upload & Process</h2>
+                  <p className="text-sm text-gray-400">Drop files or enter URL</p>
+                </div>
+              </div>
+              
+              <UploadZone />
+              <div className="my-6 border-t border-white/5"></div>
+              <UrlInput />
+              <FileList />
+            </motion.div>
+          )}
+
+          {/* SETTINGS (visible in Upload tab if files exist) */}
+          {activeTab === 'upload' && files.length > 0 && (
+            <motion.div
+              className="glass-premium rounded-2xl p-6 sm:p-8"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
             >
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-xl">
@@ -340,221 +428,271 @@ function App() {
             </motion.div>
           )}
 
-          {/* ERROR DISPLAY */}
-          <AnimatePresence>
-            {error && (
-              <motion.div
-                className="glass-premium rounded-2xl p-6 border-red-500/50 bg-red-500/10"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">⚠️</span>
-                  <div>
-                    <h3 className="font-bold text-red-300">Error</h3>
-                    <p className="text-red-200 text-sm mt-1">{error}</p>
-                  </div>
-                  <button 
-                    onClick={() => setError(null)}
-                    className="ml-auto text-red-300 hover:text-white transition"
+          {/* PREVIEW TAB */}
+          {activeTab === 'preview' && results && (
+            <motion.div
+              className="glass-premium rounded-2xl p-6 sm:p-8"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center text-xl">
+                  ✅
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white">Results</h2>
+                  <p className="text-sm text-gray-400">Download your separated tracks</p>
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                {results.map((jobResult, jobIdx) => (
+                  <motion.div 
+                    key={jobIdx}
+                    className="bg-black/20 rounded-xl p-5"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: jobIdx * 0.1 }}
                   >
-                    ✕
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                    <h4 className="text-lg text-gray-300 mb-3 flex items-center gap-2">
+                      <span className="text-purple-400">🎵</span>
+                      Job {jobIdx + 1}
+                    </h4>
+                    
+                    <div className="flex flex-wrap gap-3 mb-4">
+                      {jobResult.files.map((file: string) => (
+                        <motion.a
+                          key={file}
+                          href={getDownloadUrl(jobResult.jobId, file)}
+                          download
+                          className="btn-premium !py-2 !px-4 !text-sm inline-flex items-center gap-2"
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                        >
+                          <span>⬇️</span>
+                          {file}
+                        </motion.a>
+                      ))}
+                    </div>
 
-          {/* RESULTS SECTION */}
-          <AnimatePresence>
-            {results && (
-              <motion.div
-                className="glass-premium rounded-2xl p-6 sm:p-8"
-                initial={{ opacity: 0, y: 30 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -30 }}
-              >
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center text-xl">
-                    ✅
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-bold text-white">Results</h2>
-                    <p className="text-sm text-gray-400">Download your separated tracks</p>
-                  </div>
-                </div>
+                    {/* ZIP Download */}
+                    <div className="mb-4">
+                      <button
+                        onClick={() => window.open(`/api/download-zip/${jobResult.jobId}`, '_blank')}
+                        className="btn-premium !py-2 !px-4 !text-sm !bg-green-600 hover:!bg-green-700"
+                      >
+                        📦 Download All (ZIP)
+                      </button>
+                    </div>
 
-                <div className="space-y-6">
-                  {results.map((jobResult, jobIdx) => (
-                    <motion.div 
-                      key={jobIdx}
-                      className="bg-black/20 rounded-xl p-5"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      transition={{ delay: jobIdx * 0.1 }}
-                    >
-                      <h4 className="text-lg text-gray-300 mb-3 flex items-center gap-2">
-                        <span className="text-purple-400">🎵</span>
-                        Job {jobIdx + 1}
-                      </h4>
+                    {/* Analysis Buttons */}
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      <button
+                        onClick={() => handleAnalyze(jobResult.jobId)}
+                        className="btn-premium !py-2 !px-4 !text-sm !bg-blue-600 hover:!bg-blue-700"
+                      >
+                        🎵 Analyze (BPM/Key)
+                      </button>
                       
-                      <div className="flex flex-wrap gap-3 mb-4">
-                        {jobResult.files.map((file: string) => (
-                          <motion.a
-                            key={file}
-                            href={getDownloadUrl(jobResult.jobId, file)}
-                            download
-                            className="btn-premium !py-2 !px-4 !text-sm inline-flex items-center gap-2"
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                          >
-                            <span>⬇️</span>
-                            {file}
-                          </motion.a>
-                        ))}
-                      </div>
+                      <button
+                        onClick={() => handleHarmonicAnalysis(jobResult.jobId)}
+                        className="btn-premium !py-2 !px-4 !text-sm !bg-indigo-600 hover:!bg-indigo-700"
+                      >
+                        🎶 Harmonic Analysis
+                      </button>
 
-                      {/* ZIP Download */}
-                      <div className="mb-4">
+                      <button
+                        onClick={() => handleMaster(jobResult.jobId, 'instrumental')}
+                        className="btn-premium !py-2 !px-4 !text-sm !bg-purple-600 hover:!bg-purple-700"
+                      >
+                        🎛️ Master
+                      </button>
+                    </div>
+
+                    {/* Presets */}
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {masteringPresets.map(preset => (
                         <button
-                          onClick={() => window.open(`/api/download-zip/${jobResult.jobId}`, '_blank')}
-                          className="btn-premium !py-2 !px-4 !text-sm !bg-green-600 hover:!bg-green-700"
-                        >
-                          📦 Download All (ZIP)
-                        </button>
-                      </div>
-
-                      {/* Analysis Buttons */}
-                      <div className="flex flex-wrap gap-2 mb-4">
-                        <button
-                          onClick={() => handleAnalyze(jobResult.jobId)}
-                          className="btn-premium !py-2 !px-4 !text-sm !bg-blue-600 hover:!bg-blue-700"
-                        >
-                          🎵 Analyze (BPM/Key)
-                        </button>
-                        
-                        <button
-                          onClick={() => handleHarmonicAnalysis(jobResult.jobId)}
-                          className="btn-premium !py-2 !px-4 !text-sm !bg-indigo-600 hover:!bg-indigo-700"
-                        >
-                          🎶 Harmonic Analysis
-                        </button>
-
-                        <button
-                          onClick={() => handleMaster(jobResult.jobId, 'instrumental')}
-                          className="btn-premium !py-2 !px-4 !text-sm !bg-purple-600 hover:!bg-purple-700"
-                        >
-                          🎛️ Master
-                        </button>
-                      </div>
-
-                      {/* Presets */}
-                      <div className="flex flex-wrap gap-2 mb-4">
-                        {masteringPresets.map(preset => (
-                          <button
-                            key={preset.name}
-                            onClick={() => {
-                              setMasterLufs(preset.lufs)
-                              handleMaster(jobResult.jobId, 'instrumental')
-                            }}
-                            className={`!py-2 !px-3 !text-xs rounded-lg transition ${
-                              masterLufs === preset.lufs 
-                                ? 'bg-pink-600 text-white' 
-                                : 'bg-white/10 text-gray-300 hover:bg-white/20'
-                            }`}
-                          >
-                            {preset.name} ({preset.lufs} LUFS)
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Analysis Results */}
-                      <AnimatePresence>
-                        {bpmKey && (
-                          <motion.div 
-                            className="bg-white/5 rounded-xl p-4 mb-4"
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
-                          >
-                            <div className="flex gap-6 text-sm">
-                              <div>
-                                <span className="text-gray-400">BPM:</span>
-                                <span className="ml-2 font-bold text-white">{bpmKey.bpm}</span>
-                              </div>
-                              <div>
-                                <span className="text-gray-400">Key:</span>
-                                <span className="ml-2 font-bold text-white">{bpmKey.key}</span>
-                              </div>
-                            </div>
-                          </motion.div>
-                        )}
-
-                        {harmonicData && (
-                          <motion.div 
-                            className="bg-white/5 rounded-xl p-4 mb-4"
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
-                          >
-                            <div className="flex gap-6 text-sm flex-wrap">
-                              <div>
-                                <span className="text-gray-400">Key:</span>
-                                <span className="ml-2 font-bold text-white">
-                                  {harmonicData.key} {harmonicData.mode === 'major' ? '♭' : '♮'}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="text-gray-400">Tempo:</span>
-                                <span className="ml-2 font-bold text-white">
-                                  {Math.round(harmonicData.tempo)} BPM
-                                </span>
-                              </div>
-                              <div>
-                                <span className="text-gray-400">Mode:</span>
-                                <span className="ml-2 font-bold text-white">{harmonicData.mode}</span>
-                              </div>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-
-                      {/* Vocal Level Control */}
-                      <div className="bg-black/20 rounded-xl p-4">
-                        <label className="text-sm text-gray-300 mb-2 flex items-center gap-2">
-                          <span>🎤</span>
-                          Vocal Removal Level: <span className="text-purple-400 font-bold">{vocalLevel}</span>
-                        </label>
-                        <input 
-                          type="range" 
-                          min="0" 
-                          max="1" 
-                          step="0.1" 
-                          value={vocalLevel} 
-                          onChange={(e) => setVocalLevel(parseFloat(e.target.value))}
-                          className="w-full"
-                        />
-                        <button
-                          onClick={async () => {
-                            if (!jobResult) return;
-                            const res = await mixStems(jobResult.jobId, vocalLevel);
-                            if (res.success) addToast(`🎤 Mixed: ${res.file}`, 'success');
+                          key={preset.name}
+                          onClick={() => {
+                            setMasterLufs(preset.lufs)
+                            handleMaster(jobResult.jobId, 'instrumental')
                           }}
-                          className="btn-premium !py-2 !px-4 !text-sm mt-3"
+                          className={`!py-2 !px-3 !text-xs rounded-lg transition ${
+                            masterLufs === preset.lufs 
+                              ? 'bg-pink-600 text-white' 
+                              : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                          }`}
                         >
-                          🎤 Mix Stems
+                          {preset.name} ({preset.lufs} LUFS)
                         </button>
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                      ))}
+                    </div>
 
-          {/* HISTORY SECTION */}
-          {history.length > 0 && (
+                    {/* Analysis Results */}
+                    <AnimatePresence>
+                      {bpmKey && (
+                        <motion.div 
+                          className="bg-white/5 rounded-xl p-4 mb-4"
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                        >
+                          <div className="flex gap-6 text-sm">
+                            <div>
+                              <span className="text-gray-400">BPM:</span>
+                              <span className="ml-2 font-bold text-white">{bpmKey.bpm}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-400">Key:</span>
+                              <span className="ml-2 font-bold text-white">{bpmKey.key}</span>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {harmonicData && (
+                        <motion.div 
+                          className="bg-white/5 rounded-xl p-4 mb-4"
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                        >
+                          <div className="flex gap-6 text-sm flex-wrap">
+                            <div>
+                              <span className="text-gray-400">Key:</span>
+                              <span className="ml-2 font-bold text-white">
+                                {harmonicData.key} {harmonicData.mode === 'major' ? '♭' : '♮'}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-gray-400">Tempo:</span>
+                              <span className="ml-2 font-bold text-white">
+                                {Math.round(harmonicData.tempo)} BPM
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-gray-400">Mode:</span>
+                              <span className="ml-2 font-bold text-white">{harmonicData.mode}</span>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Vocal Level Control */}
+                    <div className="bg-black/20 rounded-xl p-4">
+                      <label className="text-sm text-gray-300 mb-2 flex items-center gap-2">
+                        <span>🎤</span>
+                        Vocal Removal Level: <span className="text-purple-400 font-bold">{vocalLevel}</span>
+                      </label>
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max="1" 
+                        step="0.1" 
+                        value={vocalLevel} 
+                        onChange={(e) => setVocalLevel(parseFloat(e.target.value))}
+                        className="w-full"
+                      />
+                      <button
+                        onClick={async () => {
+                          if (!jobResult) return;
+                          const res = await mixStems(jobResult.jobId, vocalLevel);
+                          if (res.success) addToast(`🎤 Mixed: ${res.file}`, 'success');
+                        }}
+                        className="btn-premium !py-2 !px-4 !text-sm mt-3"
+                      >
+                        🎤 Mix Stems
+                      </button>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {/* 3D VISUALIZER TAB */}
+          {activeTab === '3d' && (
+            <motion.div
+              className="glass-premium rounded-2xl p-6 sm:p-8"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center text-xl">
+                  🎧
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white">3D Audio Visualizer</h2>
+                  <p className="text-sm text-gray-400">Real-time 3D visualization</p>
+                </div>
+              </div>
+
+              <Visualizer3D audioUrl={currentAudioUrl || undefined} isPlaying={isPlaying} />
+              
+              <div className="mt-6 flex gap-4 justify-center">
+                <button
+                  onClick={togglePlay}
+                  className="btn-premium !py-3 !px-6"
+                >
+                  {isPlaying ? '⏸️ Pause' : '▶️ Play'}
+                </button>
+                {currentAudioUrl && (
+                  <audio 
+                    ref={audioRef}
+                    src={currentAudioUrl}
+                    onEnded={() => setIsPlaying(false)}
+                    className="hidden"
+                  />
+                )}
+              </div>
+            </motion.div>
+          )}
+
+          {/* KARAOKE TAB */}
+          {activeTab === 'karaoke' && (
+            <motion.div
+              className="glass-premium rounded-2xl p-6 sm:p-8"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-500 to-red-500 flex items-center justify-center text-xl">
+                  🎤
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white">Karaoke Mode</h2>
+                  <p className="text-sm text-gray-400">Sing along with lyrics</p>
+                </div>
+              </div>
+
+              <KaraokeViewer lyrics={lyrics} currentTime={currentTime} isPlaying={isPlaying} />
+              
+              <div className="mt-6 flex gap-4 justify-center">
+                <button
+                  onClick={togglePlay}
+                  className="btn-premium !py-3 !px-6"
+                >
+                  {isPlaying ? '⏸️ Pause' : '▶️ Play'}
+                </button>
+                {currentAudioUrl && (
+                  <audio 
+                    ref={audioRef}
+                    src={currentAudioUrl}
+                    onEnded={() => setIsPlaying(false)}
+                    className="hidden"
+                  />
+                )}
+                <p className="text-xs text-gray-400 self-center">
+                  Press SPACE to play/pause
+                </p>
+              </div>
+            </motion.div>
+          )}
+
+          {/* HISTORY TAB */}
+          {activeTab === 'history' && history.length > 0 && (
             <motion.div
               className="glass-premium rounded-2xl p-6 sm:p-8"
               initial={{ opacity: 0, y: 30 }}
@@ -612,8 +750,34 @@ function App() {
             </motion.div>
           )}
 
-          {/* PREVIEW SECTION */}
-          {files.length > 0 && (
+          {/* ERROR DISPLAY */}
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                className="glass-premium rounded-2xl p-6 border-red-500/50 bg-red-500/10"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">⚠️</span>
+                  <div>
+                    <h3 className="font-bold text-red-300">Error</h3>
+                    <p className="text-red-200 text-sm mt-1">{error}</p>
+                  </div>
+                  <button 
+                    onClick={() => setError(null)}
+                    className="ml-auto text-red-300 hover:text-white transition"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* WAVEFORM & SPECTROGRAM (in Preview tab) */}
+          {activeTab === 'preview' && files.length > 0 && (
             <motion.div
               className="glass-premium rounded-2xl p-6 sm:p-8"
               initial={{ opacity: 0, y: 30 }}
@@ -625,7 +789,7 @@ function App() {
                   👁️
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-white">Preview</h2>
+                  <h2 className="text-xl font-bold text-white">Audio Preview</h2>
                   <p className="text-sm text-gray-400">Waveform & Spectrogram</p>
                 </div>
               </div>
@@ -641,8 +805,8 @@ function App() {
             </motion.div>
           )}
 
-          {/* EQ SECTION */}
-          {files.length > 0 && (
+          {/* EQ (in Preview tab) */}
+          {activeTab === 'preview' && files.length > 0 && (
             <motion.div
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
@@ -665,6 +829,9 @@ function App() {
           <div className="glass-premium rounded-xl p-4">
             <p className="text-sm text-gray-400">
               Built with 💜 using React, Framer Motion & Tailwind CSS
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Features: 3D Visualizer • Karaoke Mode • AI Separation • Mobile Optimized 🎧🎤📱
             </p>
           </div>
         </motion.footer>
