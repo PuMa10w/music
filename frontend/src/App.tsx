@@ -40,6 +40,17 @@ function App() {
   const { progress: wsProgress } = useWebSocket(currentJobId)
   const { history, addToHistory, clearHistory } = useProcessingHistory()
   
+  // Mobile detection
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 640)
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+  
   // New states for 3D, Karaoke, Tabs
   const [activeTab, setActiveTab] = useState<TabType>('upload')
   const [isPlaying, setIsPlaying] = useState(false)
@@ -219,6 +230,14 @@ function App() {
     '6stem': { emoji: '🎚️', label: '6 Stem', desc: 'Full separation' },
   }
 
+  const tabs = [
+    { id: 'upload' as TabType, icon: '📤', label: 'Upload' },
+    { id: 'preview' as TabType, icon: '👁️', label: 'Preview' },
+    { id: '3d' as TabType, icon: '🎧', label: '3D Viz' },
+    { id: 'karaoke' as TabType, icon: '🎤', label: 'Karaoke' },
+    { id: 'history' as TabType, icon: '📊', label: 'History' },
+  ]
+
   return (
     <ErrorBoundary>
       <Toast toasts={toasts} addToast={addToast} />
@@ -230,7 +249,7 @@ function App() {
       >
         <FirefliesBackground />
         
-        {/* HEADER - Mobile Optimized */}
+        {/* HEADER */}
         <motion.header 
           className="max-w-6xl mx-auto mb-8"
           initial={{ y: -50, opacity: 0 }}
@@ -260,18 +279,12 @@ function App() {
           </div>
         </motion.header>
 
-        <main className="max-w-6xl mx-auto px-0 sm:px-4 space-y-6">
+        <main className="max-w-6xl mx-auto px-0 sm:px-4 space-y-6 pb-24 sm:pb-6">
           
-          {/* TAB NAVIGATION - Mobile Scrollable */}
-          <div className="glass-premium rounded-2xl p-2 sm:p-4 overflow-x-auto">
+          {/* DESKTOP TAB NAVIGATION */}
+          <div className="glass-premium rounded-2xl p-2 sm:p-4 overflow-x-auto desktop-tabs">
             <div className="flex gap-2 min-w-max sm:min-w-0 sm:flex-wrap">
-              {([
-                { id: 'upload', icon: '📤', label: 'Upload' },
-                { id: 'preview', icon: '👁️', label: 'Preview' },
-                { id: '3d', icon: '🎧', label: '3D Viz' },
-                { id: 'karaoke', icon: '🎤', label: 'Karaoke' },
-                { id: 'history', icon: '📊', label: 'History' },
-              ] as { id: TabType, icon: string, label: string }[]).map(tab => (
+              {tabs.map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
@@ -818,6 +831,20 @@ function App() {
             </motion.div>
           )}
         </main>
+
+        {/* MOBILE BOTTOM NAVIGATION */}
+        <div className="mobile-bottom-nav mobile-tabs">
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`${activeTab === tab.id ? 'active' : ''}`}
+            >
+              <span className="text-2xl">{tab.icon}</span>
+              <span className="text-xs mt-1">{tab.label}</span>
+            </button>
+          ))}
+        </div>
 
         {/* FOOTER */}
         <motion.footer 
