@@ -30,7 +30,7 @@ export default function UploadZone() {
       <input 
         type="file" 
         multiple 
-        accept="audio/*,video/*"
+        accept=".mp3,.wav,.m4a,.ogg,.flac,.mp4,.webm,.opus,.aac,audio/*,video/*"
         onChange={handleChange}
         className="hidden"
         id="fileInput"
@@ -38,7 +38,7 @@ export default function UploadZone() {
       <label htmlFor="fileInput" className="cursor-pointer">
         <div className="text-2xl mb-4">🎵</div>
         <p className="text-gray-300 text-sm sm:text-base">Перетащите файлы сюда или нажмите для выбора</p>
-        <p className="text-gray-500 text-sm mt-2">Поддерживаются аудио и видео форматы</p>
+        <p className="text-gray-500 text-sm mt-2">Поддерживаются: MP3, WAV, M4A, OGG, FLAC, AAC, MP4, WEBM, OPUS</p>
       </label>
     </div>
   )

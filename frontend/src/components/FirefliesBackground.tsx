@@ -1,10 +1,9 @@
-import React, { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import Particles from 'react-tsparticles';
 import { loadSlim } from 'tsparticles-slim';
 import type { Engine } from 'tsparticles-engine';
 
 export default function FirefliesBackground() {
-  const ref = useRef<Engine>();
 
   const particlesInit = useCallback(async (engine: Engine) => {
     await loadSlim(engine);

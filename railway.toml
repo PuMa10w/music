@@ -1,0 +1,19 @@
+[build]
+  builder = "dockerfile"
+  dockerfilePath = "music/Dockerfile"
+  context = "music"
+
+[deploy]
+  port = 8000
+  startCommand = "node server.js"
+  healthcheckPath = "/api/models"
+  healthcheckTimeout = 30
+
+[env]
+  NODE_ENV = "production"
+  PYTHON_PATH = "/usr/bin/python3"
+
+[[services]]
+  name = "redis"
+  image = "redis:7-alpine"
+  port = 6379

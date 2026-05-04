@@ -16,9 +16,19 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'framer-motion'],
-          wavesurfer: ['wavesurfer.js'],
+        manualChunks: (id: string) => {
+          if (id.includes('node_modules/react-dom') || id.includes('node_modules/react')) {
+            return 'vendor-react';
+          }
+          if (id.includes('node_modules/framer-motion')) {
+            return 'vendor-framer';
+          }
+          if (id.includes('node_modules/wavesurfer.js')) {
+            return 'vendor-wavesurfer';
+          }
+          if (id.includes('node_modules/zustand')) {
+            return 'vendor-zustand';
+          }
         },
       },
     },

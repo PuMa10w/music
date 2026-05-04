@@ -1,7 +1,20 @@
 __MACOSX/
 package-lock.json
+node_modules/
 
 music/config.local.json
 music/__pycache__/
-music/test_tone.wav
 music/venv/
+music/tmp/
+music/test_tone.wav
+music/*.wav
+
+frontend/dist/
+frontend/node_modules/
+frontend/.vercel/
+frontend/vercel.json
+
+.venv/
+venv/
+*.Zone.Identifier
+.wrangler/

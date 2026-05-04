@@ -45,7 +45,7 @@ export async function startSeparation(jobId: string, params: {
   return res.json()
 }
 
-export async function checkStatus(jobId: string): Promise<{ status: string, result?: any }> {
+export async function checkStatus(jobId: string): Promise<{ status: string; result?: any; error?: string }> {
   const res = await fetch(`${API_BASE}/status/${jobId}`)
   return res.json()
 }

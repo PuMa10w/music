@@ -1,8 +1,8 @@
-import { useState, useCallback } from 'react'
+import { useState } from 'react'
 import { downloadExternal } from '../api/api'
 
 interface Props {
-  onDownloadComplete: (jobId: string, filename: string) => void
+  onDownloadComplete?: (jobId: string, filename: string) => void
 }
 
 // URL validation patterns
@@ -44,7 +44,7 @@ export default function UrlInput({ onDownloadComplete }: Props) {
     try {
       const res = await downloadExternal(url)
       if (res.success) {
-        onDownloadComplete(res.jobId, res.filename)
+        onDownloadComplete?.(res.jobId, res.filename)
         setUrl('')
       } else {
         setError(res.error || 'Download failed')

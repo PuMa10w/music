@@ -13,11 +13,14 @@ import Toast from './components/Toast'
 import SystemStatus from './components/SystemStatus'
 import FirefliesBackground from './components/FirefliesBackground'
 import Visualizer3D from './components/Visualizer3D'
-import KaraokeViewer from './components/KaraokeViewer'
+import KaraokeMode from './components/KaraokeMode'
+import Skeleton, { SkeletonCard } from './components/Skeleton'
+import MetadataEditor from './components/MetadataEditor'
+import MobileNav from './components/MobileNav'
 
 const Waveform = lazy(() => import('./components/Waveform'))
 const Spectrogram = lazy(() => import('./components/Spectrogram'))
-const EQ = lazy(() => import('./components/EQ'))
+const InteractiveEQ = lazy(() => import('./components/InteractiveEQ'))
 
 type TabType = 'upload' | 'preview' | '3d' | 'karaoke' | 'history'
 
@@ -25,6 +28,35 @@ function App() {
   const files = useStore(s => s.files)
   const currentMode = useStore(s => s.currentMode)
   const setMode = useStore(s => s.setMode)
+  
+  // PWA Install state
+  const [pwaInstallAvailable, setPwaInstallAvailable] = useState(false)
+  
+  // Check for PWA install prompt
+  useEffect(() => {
+    const checkPWA = () => {
+      if (window.deferredPWA) {
+        setPwaInstallAvailable(true)
+      }
+    }
+    checkPWA()
+    window.addEventListener('appinstalled', () => setPwaInstallAvailable(false))
+    return () => {
+      window.removeEventListener('appinstalled', () => setPwaInstallAvailable(false))
+    }
+  }, [])
+  
+  // Handle PWA install
+  const handleInstallPWA = async () => {
+    if (!window.deferredPWA) return
+    window.deferredPWA.prompt()
+    const { outcome } = await window.deferredPWA.userChoice
+    if (outcome === 'accepted') {
+      console.log('PWA installed')
+    }
+    window.deferredPWA = undefined
+    setPwaInstallAvailable(false)
+  }
   
   // State
   const [processing, setProcessing] = useState(false)
@@ -55,8 +87,8 @@ function App() {
   const [activeTab, setActiveTab] = useState<TabType>('upload')
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null)
-  const [lyrics, setLyrics] = useState<Array<{ start: number, end: number, text: string }>>([])
-  const [currentTime, setCurrentTime] = useState(0)
+  const [, setCurrentTime] = useState(0)
+  const [, setLyrics] = useState<Array<{ start: number; end: number; text: string }>>([])
   const audioRef = useRef<HTMLAudioElement>(null)
 
   // Keyboard shortcuts
@@ -119,14 +151,14 @@ function App() {
         const file = files[i]
         setBatchProgress({ current: i + 1, total: files.length })
         
-        const res = await uploadFile(file)
-        if (res.jobId) {
-          setCurrentJobId(res.jobId)
-          const sepRes = await startSeparation(res.jobId, {
-            model: 'modern_ensemble',
-            mode: currentMode,
-            preset: 'default'
-          })
+          const res = await uploadFile(file)
+          if (res.jobId) {
+            setCurrentJobId(res.jobId)
+            await startSeparation(res.jobId, {
+              model: 'modern_ensemble',
+              mode: currentMode,
+              preset: 'default'
+            })
           
           const data = await pollJobStatus(res.jobId, (status) => {
             console.log(`File ${i+1}/${files.length} status:`, status)
@@ -218,6 +250,30 @@ function App() {
     }
   }
 
+  const handleRadioReady = async (jobId: string, platform: string = 'spotify') => {
+    try {
+      setError(null)
+      addToast(`🚀 Starting One-Click Radio Ready for ${platform}...`, 'info')
+      
+      const response = await fetch(`http://localhost:8000/api/radio-ready/${jobId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform })
+      })
+      
+      const data = await response.json()
+      if (response.ok) {
+        addToast(`✅ Radio Ready complete! Files: ${data.files?.join(', ')}`, 'success')
+        // Optionally refresh results or show download links
+      } else {
+        addToast(`❌ Radio Ready failed: ${data.error}`, 'error')
+      }
+    } catch (e: any) {
+      setError(e.message || 'Radio Ready failed')
+      addToast(`❌ Radio Ready error: ${e.message}`, 'error')
+    }
+  }
+
   const masteringPresets = [
     { name: 'Spotify', lufs: -14.0 },
     { name: 'YouTube', lufs: -13.0 },
@@ -238,11 +294,39 @@ function App() {
     { id: 'history' as TabType, icon: '📊', label: 'History' },
   ]
 
+  // Swipe gesture state
+  const [touchStartX, setTouchStartX] = useState<number | null>(null)
+  
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchStartX(e.touches[0].clientX)
+  }
+  
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX === null) return
+    
+    const touchEndX = e.changedTouches[0].clientX
+    const diff = touchStartX - touchEndX
+    const swipeThreshold = 50
+    
+    if (Math.abs(diff) > swipeThreshold) {
+      const currentIndex = tabs.findIndex(tab => tab.id === activeTab)
+      if (diff > 0 && currentIndex < tabs.length - 1) {
+        // Swiped left -> next tab
+        setActiveTab(tabs[currentIndex + 1].id)
+      } else if (diff < 0 && currentIndex > 0) {
+        // Swiped right -> previous tab
+        setActiveTab(tabs[currentIndex - 1].id)
+      }
+    }
+    
+    setTouchStartX(null)
+  }
+
   return (
     <ErrorBoundary>
-      <Toast toasts={toasts} addToast={addToast} />
+      <Toast toasts={toasts} />
       <motion.div 
-        className="min-h-screen aurora-bg p-4 sm:p-6 lg:p-8"
+        className={`min-h-screen aurora-bg p-4 sm:p-6 lg:p-8 ${isMobile ? 'pb-20' : ''}`}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.8 }}
@@ -275,11 +359,34 @@ function App() {
               </div>
               
               <SystemStatus />
+              
+              {/* PWA Install Button */}
+              {pwaInstallAvailable && (
+                <motion.button
+                  onClick={handleInstallPWA}
+                  className="btn-premium !py-2 !px-4 !text-sm !bg-gradient-to-r from-purple-600 to-pink-600 hover:!from-purple-700 hover:!to-pink-700"
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  📱 Install App
+                </motion.button>
+              )}
             </div>
           </div>
         </motion.header>
 
-        <main className="max-w-6xl mx-auto px-0 sm:px-4 space-y-6 pb-24 sm:pb-6">
+        <motion.main 
+          key={activeTab}
+          className="max-w-6xl mx-auto px-0 sm:px-4 space-y-6 pb-24 sm:pb-6"
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+        >
           
           {/* DESKTOP TAB NAVIGATION */}
           <div className="glass-premium rounded-2xl p-2 sm:p-4 overflow-x-auto desktop-tabs">
@@ -441,13 +548,18 @@ function App() {
             </motion.div>
           )}
 
-          {/* PREVIEW TAB */}
-          {activeTab === 'preview' && results && (
-            <motion.div
-              className="glass-premium rounded-2xl p-6 sm:p-8"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
+          {/* TAB CONTENT WITH MORPHING */}
+          <AnimatePresence mode="wait">
+            {/* PREVIEW TAB */}
+            {activeTab === 'preview' && results && (
+              <motion.div
+                key="preview"
+                className="glass-premium rounded-2xl p-6 sm:p-8"
+                initial={{ opacity: 0, y: 30, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -30, scale: 0.95 }}
+                transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+              >
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center text-xl">
                   ✅
@@ -520,6 +632,34 @@ function App() {
                       >
                         🎛️ Master
                       </button>
+                    </div>
+
+                    {/* Radio Ready */}
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      <motion.button
+                        onClick={() => handleRadioReady(jobResult.jobId, 'spotify')}
+                        className="btn-premium !py-2 !px-4 !text-sm !bg-gradient-to-r from-purple-600 to-pink-600 hover:!from-purple-700 hover:!to-pink-700"
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                      >
+                        🚀 Radio Ready (Spotify)
+                      </motion.button>
+                      <motion.button
+                        onClick={() => handleRadioReady(jobResult.jobId, 'youtube')}
+                        className="btn-premium !py-2 !px-4 !text-sm !bg-red-600 hover:!bg-red-700"
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                      >
+                        📺 Radio Ready (YouTube)
+                      </motion.button>
+                      <motion.button
+                        onClick={() => handleRadioReady(jobResult.jobId, 'tiktok')}
+                        className="btn-premium !py-2 !px-4 !text-sm !bg-gray-800 hover:!bg-gray-900 border border-white/20"
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                      >
+                        🎵 TikTok Cut
+                      </motion.button>
                     </div>
 
                     {/* Presets */}
@@ -619,6 +759,15 @@ function App() {
                         🎤 Mix Stems
                       </button>
                     </div>
+                    {/* Metadata Editing for each stem */}
+                    {jobResult.files.map((file: string) => {
+                      const stemName = file.replace(/\.[^/.]+$/, '');
+                      return (
+                        <div key={file} className="mt-6">
+                          <MetadataEditor jobId={jobResult.jobId} stem={stemName} fileName={file} />
+                        </div>
+                      );
+                    })}
                   </motion.div>
                 ))}
               </div>
@@ -628,9 +777,12 @@ function App() {
           {/* 3D VISUALIZER TAB */}
           {activeTab === '3d' && (
             <motion.div
+              key="3d"
               className="glass-premium rounded-2xl p-6 sm:p-8"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
+              initial={{ opacity: 0, y: 30, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -30, scale: 0.95 }}
+              transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
             >
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center text-xl">
@@ -666,51 +818,28 @@ function App() {
           {/* KARAOKE TAB */}
           {activeTab === 'karaoke' && (
             <motion.div
+              key="karaoke"
               className="glass-premium rounded-2xl p-6 sm:p-8"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
+              initial={{ opacity: 0, y: 30, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -30, scale: 0.95 }}
+              transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
             >
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-500 to-red-500 flex items-center justify-center text-xl">
-                  🎤
-                </div>
-                <div>
-                  <h2 className="text-xl font-bold text-white">Karaoke Mode</h2>
-                  <p className="text-sm text-gray-400">Sing along with lyrics</p>
-                </div>
-              </div>
-
-              <KaraokeViewer lyrics={lyrics} currentTime={currentTime} isPlaying={isPlaying} />
-              
-              <div className="mt-6 flex gap-4 justify-center">
-                <button
-                  onClick={togglePlay}
-                  className="btn-premium !py-3 !px-6"
-                >
-                  {isPlaying ? '⏸️ Pause' : '▶️ Play'}
-                </button>
-                {currentAudioUrl && (
-                  <audio 
-                    ref={audioRef}
-                    src={currentAudioUrl}
-                    onEnded={() => setIsPlaying(false)}
-                    className="hidden"
-                  />
-                )}
-                <p className="text-xs text-gray-400 self-center">
-                  Press SPACE to play/pause
-                </p>
-              </div>
+              <Suspense fallback={<SkeletonCard />}>
+                <KaraokeMode />
+              </Suspense>
             </motion.div>
           )}
 
           {/* HISTORY TAB */}
           {activeTab === 'history' && history.length > 0 && (
             <motion.div
+              key="history"
               className="glass-premium rounded-2xl p-6 sm:p-8"
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 }}
+              initial={{ opacity: 0, y: 30, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -30, scale: 0.95 }}
+              transition={{ duration: 0.4, delay: 0.4, ease: [0.4, 0, 0.2, 1] }}
             >
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
@@ -762,6 +891,7 @@ function App() {
               </div>
             </motion.div>
           )}
+          </AnimatePresence>
 
           {/* ERROR DISPLAY */}
           <AnimatePresence>
@@ -807,7 +937,12 @@ function App() {
                 </div>
               </div>
 
-              <Suspense fallback={<div className="text-center p-8 text-gray-400">Loading preview...</div>}>
+              <Suspense fallback={
+                <div className="space-y-6">
+                  <Skeleton className="h-36 w-full rounded-xl" />
+                  <Skeleton className="h-48 w-full rounded-xl" />
+                </div>
+              }>
                 {files[0] && (
                   <div className="space-y-6">
                     <Waveform audioUrl={URL.createObjectURL(files[0])} height={150} />
@@ -825,12 +960,12 @@ function App() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.6 }}
             >
-              <Suspense fallback={null}>
-                <EQ />
+              <Suspense fallback={<Skeleton className="h-64 w-full rounded-xl" />}>
+                <InteractiveEQ />
               </Suspense>
             </motion.div>
           )}
-        </main>
+        </motion.main>
 
         {/* MOBILE BOTTOM NAVIGATION */}
         <div className="mobile-bottom-nav mobile-tabs">
@@ -862,6 +997,16 @@ function App() {
             </p>
           </div>
         </motion.footer>
+
+        {/* Mobile Navigation */}
+        {isMobile && (
+          <MobileNav 
+            activeTab={activeTab} 
+            onTabChange={setActiveTab}
+            hasResults={results !== null}
+            historyCount={history.length}
+          />
+        )}
       </motion.div>
     </ErrorBoundary>
   )

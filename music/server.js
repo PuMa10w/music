@@ -10,6 +10,7 @@ const ffmpegPath = require('ffmpeg-static');
 const ffprobePath = require('ffprobe-static').path;
 const http = require('http');
 const { Server } = require('socket.io');
+const ID3 = require('node-id3');
 
 const execPromise = util.promisify(exec);
 const execFilePromise = util.promisify(execFile);
@@ -699,6 +700,55 @@ app.post('/api/youtube', async (req, res) => {
     }
 });
 
+// ===== VIDEO TO AUDIO (Extract audio from video files) =====
+app.post('/api/video-to-audio/:jobId', validateJobId, validateJobDir, upload.single('video'), async (req, res) => {
+    const jobId = req.params.jobId;
+    const jobDir = path.join(UPLOAD_DIR, jobId);
+    
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'Video file is required' });
+        }
+
+        const inputVideo = path.join(jobDir, req.file.filename);
+        const outputAudio = path.join(jobDir, 'extracted_audio.wav');
+
+        // Extract audio: -vn (no video), convert to WAV
+        const ffmpegArgs = [
+            '-i', inputVideo,
+            '-vn', // no video
+            '-acodec', 'pcm_s16le', // PCM WAV
+            '-ar', '44100', // 44.1kHz
+            '-ac', '2', // stereo
+            '-y', outputAudio
+        ];
+
+        await runFfmpeg(ffmpegArgs);
+
+        if (!fs.existsSync(outputAudio)) {
+            return res.status(500).json({ error: 'Audio extraction failed - output not created' });
+        }
+
+        // Validate extracted audio
+        const validation = await validateAudioFile(outputAudio);
+        if (!validation.valid) {
+            fs.unlinkSync(outputAudio);
+            return res.status(400).json({ error: `Extracted audio invalid: ${validation.error}` });
+        }
+
+        res.json({ 
+            success: true, 
+            file: 'extracted_audio.wav',
+            path: outputAudio,
+            info: validation.info
+        });
+
+    } catch (error) {
+        console.error('[Video to Audio Error]', error);
+        res.status(500).json({ error: 'Audio extraction failed', details: error.message });
+    }
+});
+
 // ===== MIDDLEWARE =====
 
 /**
@@ -1372,27 +1422,47 @@ setInterval(() => {
     }
 }, 5 * 60 * 1000);
 
-// ===== DENOISE ENDPOINT =====
-app.post('/api/denoise/:jobId', validateJobId, validateJobDir, async (req, res) => {
+// ===== NOISE REDUCTION ENDPOINT (using FFmpeg afftdn) =====
+app.post('/api/reduce-noise/:jobId', validateJobId, validateJobDir, async (req, res) => {
     const jobId = req.params.jobId;
     const jobDir = path.join(UPLOAD_DIR, jobId);
-    const { strength = 0.5, stem = 'vocals' } = req.body;
+    const { stem = 'vocals', level = 0.5 } = req.body;
 
     try {
-        const targetFile = path.join(jobDir, `${stem}.wav`);
-        if (!fs.existsSync(targetFile)) {
+        const inputFile = path.join(jobDir, `${stem}.wav`);
+        if (!fs.existsSync(inputFile)) {
             return res.status(404).json({ error: `File ${stem}.wav not found` });
         }
 
         const outputFile = path.join(jobDir, `${stem}_denoised.wav`);
-        const scriptPath = path.join(__dirname, 'denoise.py');
         
-        await runPythonScript(scriptPath, [targetFile, outputFile, String(strength)]);
+        // afftdn = ATF (Adaptive Temporal Filtering) Denoiser
+        // Higher level = more noise reduction (but may affect quality)
+        const filter = `afftdn=nr=${level}:nf=-25`;
         
-        res.json({ success: true, file: `${stem}_denoised.wav`, path: outputFile });
+        const ffmpegArgs = [
+            '-i', inputFile,
+            '-af', filter,
+            '-acodec', 'pcm_s16le',
+            '-y', outputFile
+        ];
+
+        await runFfmpeg(ffmpegArgs);
+
+        if (!fs.existsSync(outputFile)) {
+            return res.status(500).json({ error: 'Noise reduction failed - output not created' });
+        }
+
+        res.json({ 
+            success: true, 
+            file: `${stem}_denoised.wav`,
+            path: outputFile,
+            settings: { stem, level }
+        });
+
     } catch (error) {
-        console.error('[Denoise Error]', error);
-        res.status(500).json({ error: 'Denoise failed', details: error.message });
+        console.error('[Noise Reduction Error]', error);
+        res.status(500).json({ error: 'Noise reduction failed', details: error.message });
     }
 });
 
@@ -1400,17 +1470,64 @@ app.post('/api/denoise/:jobId', validateJobId, validateJobDir, async (req, res) 
 app.post('/api/master/:jobId', validateJobId, validateJobDir, async (req, res) => {
     const jobId = req.params.jobId;
     const jobDir = path.join(UPLOAD_DIR, jobId);
-    const { stem = 'instrumental', target_lufs = -14.0 } = req.body;
+    
+    const { 
+        stem = 'instrumental', 
+        lufs = -14.0, 
+        true_peak = -1.0,
+        stereo_width = 100,
+        dither = true 
+    } = req.body;
 
     try {
         const inputFile = path.join(jobDir, `${stem}.wav`);
         if (!fs.existsSync(inputFile)) {
             return res.status(404).json({ error: `File ${stem}.wav not found` });
         }
+
         const outputFile = path.join(jobDir, `${stem}_mastered.wav`);
-        const scriptPath = path.join(__dirname, 'mastering.py');
-        await runPythonScript(scriptPath, [inputFile, outputFile, String(target_lufs)]);
-        res.json({ success: true, file: `${stem}_mastered.wav`, path: outputFile });
+        
+        // Build filter complex for professional mastering
+        const filters = [];
+        
+        // 1. Stereo Width control (if not 100%)
+        if (stereo_width !== 100) {
+            const width = stereo_width / 100;
+            filters.push(`stereotools=m1=${width}:m2=${width}`);
+        }
+        
+        // 2. Loudness normalization (EBU R128)
+        filters.push(`loudnorm=I=${lufs}:TP=${true_peak}:LRA=7`);
+        
+        // 3. Dithering (for bit-depth reduction if needed)
+        let outputArgs = [];
+        if (dither) {
+            // Apply dithering when converting to lower bit depth
+            outputArgs = ['-acodec', 'pcm_s16le'];
+        } else {
+            outputArgs = ['-acodec', 'pcm_s16le'];
+        }
+
+        const ffmpegArgs = [
+            '-i', inputFile,
+            '-af', filters.join(','),
+            ...outputArgs,
+            '-y', outputFile
+        ];
+
+        await runFfmpeg(ffmpegArgs);
+
+        if (!fs.existsSync(outputFile)) {
+            return res.status(500).json({ error: 'Mastering failed - output not created' });
+        }
+
+        res.json({ 
+            success: true, 
+            file: `${stem}_mastered.wav`,
+            path: outputFile,
+            settings: { lufs, true_peak, stereo_width, dither }
+        });
+
     } catch (error) {
         console.error('[Mastering Error]', error);
         res.status(500).json({ error: 'Mastering failed', details: error.message });
@@ -1828,6 +1945,415 @@ app.get('/api/download-zip/:jobId', validateJobId, async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ error: e.message || 'ZIP creation failed' });
+  }
+});
+
+// ===== ПРИМЕНЕНИЕ ЭФФЕКТОВ =====
+app.post('/api/apply-effects/:jobId', validateJobId, validateJobDir, async (req, res) => {
+    try {
+        const { jobId } = req.params;
+        const { 
+            stem = 'vocals', 
+            reverb = 0,      // 0-100 (%)
+            delay = 0,       // 0-500 (ms)
+            chorus = 0       // 0-100 (%)
+        } = req.body;
+        
+        const jobDir = req.jobDir;
+
+        // Find target stem file
+        const files = fs.readdirSync(jobDir);
+        const stemFile = files.find(f => 
+            f.includes(stem) && 
+            f.endsWith('.wav') && 
+            !f.includes('effected')
+        );
+
+        if (!stemFile) {
+            return res.status(404).json({ error: `Stem file for '${stem}' not found` });
+        }
+
+        const inputPath = path.join(jobDir, stemFile);
+        const outputFile = `${stem}_effected.wav`;
+        const outputPath = path.join(jobDir, outputFile);
+
+        // Build ffmpeg filter complex
+        const filters = [];
+
+        // Reverb (aecho): map 0-100 to meaningful values
+        if (reverb > 0) {
+            const reverbMs = Math.max(1, Math.round(reverb * 10)); // 0-1000ms
+            const decay = 0.5 + (reverb / 200); // 0.5 - 1.0
+            filters.push(`aecho=0.8:${decay.toFixed(2)}:${reverbMs}:${decay.toFixed(2)}`);
+        }
+
+        // Delay (adelay): in ms
+        if (delay > 0) {
+            filters.push(`adelay=${delay}|${delay}`);
+        }
+
+        // Chorus: map 0-100 to depth/rate
+        if (chorus > 0) {
+            const depth = 0.1 + (chorus / 200); // 0.1 - 0.6
+            const rate = 0.5 + (chorus / 250);   // 0.5 - 1.9
+            // chorus=in_gain:out_gain:delays:decays:speeds:depths:rates
+            filters.push(`chorus=0.5:0.9:50|60:${decay}|${decay}:${rate}|${rate}:${depth}|${depth}`);
+        }
+
+        const filterComplex = filters.join(',');
+
+        const ffmpegArgs = ['-i', inputPath];
+        if (filterComplex) {
+            ffmpegArgs.push('-af', filterComplex);
+        }
+        ffmpegArgs.push('-y', outputPath);
+
+        await runFfmpeg(ffmpegArgs);
+
+        res.json({ 
+            success: true, 
+            file: outputFile,
+            stem,
+            effects: { reverb, delay, chorus }
+        });
+
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to apply effects: ' + error.message });
+    }
+});
+
+// ===== МИКШИРОВАНИЕ СТЕМОВ =====
+app.post('/api/mix-stems/:jobId', validateJobId, validateJobDir, async (req, res) => {
+    try {
+        const { jobId } = req.params;
+        const volumes = req.body.volumes || {}; // { "vocals": 80, "drums": 100, ... }
+        const jobDir = req.jobDir;
+
+        const files = fs.readdirSync(jobDir);
+        const stemFiles = files.filter(f => 
+            f.endsWith('.wav') && 
+            !f.includes('input') && 
+            !f.includes('effected') &&
+            !f.includes('transcription')
+        );
+
+        if (stemFiles.length === 0) {
+            return res.status(404).json({ error: 'No stem files found' });
+        }
+
+        // Build ffmpeg filter for volume adjustment and mixing
+        const inputs = [];
+        const filterParts = [];
+        
+        stemFiles.forEach((file, index) => {
+            inputs.push('-i', path.join(jobDir, file));
+            
+            // Extract stem name for volume
+            const stemName = file.replace('.wav', '').toLowerCase();
+            const volume = (volumes[stemName] || 100) / 100;
+            
+            filterParts.push(`[${index}:a]volume=${volume}[a${index}]`);
+        });
+
+        // Mix all adjusted streams
+        const mixInputs = stemFiles.map((_, i) => `[a${i}]`).join('');
+        filterParts.push(`${mixInputs}amix=inputs=${stemFiles.length}:duration=longest[aout]`);
+
+        const outputPath = path.join(jobDir, 'mixed_stems.wav');
+        const filterComplex = filterParts.join(';');
+
+        const ffmpegArgs = [
+            ...inputs,
+            '-filter_complex', filterComplex,
+            '-map', '[aout]',
+            '-y', outputPath
+        ];
+
+        await runFfmpeg(ffmpegArgs);
+
+        if (!fs.existsSync(outputPath)) {
+            return res.status(500).json({ error: 'Failed to create mix' });
+        }
+
+        res.json({ success: true, file: 'mixed_stems.wav' });
+
+    } catch (error) {
+        res.status(500).json({ error: 'Mix failed: ' + error.message });
+    }
+});
+
+// ===== TRIM AUDIO =====
+app.post('/api/trim/:jobId', validateJobId, validateJobDir, async (req, res) => {
+    try {
+        const { jobId } = req.params;
+        const { start = 0, end = 60 } = req.body;
+        const jobDir = req.jobDir;
+
+        const files = fs.readdirSync(jobDir);
+        const inputFile = files.find(f => /\.(wav|mp3|m4a|ogg|flac)$/i.test(f));
+        if (!inputFile) return res.status(404).json({ error: 'Audio file not found' });
+
+        const inputPath = path.join(jobDir, inputFile);
+        const outputPath = path.join(jobDir, 'trimmed.wav');
+
+        const ffmpegArgs = [
+            '-i', inputPath,
+            '-ss', start.toString(),
+            '-to', end.toString(),
+            '-y', outputPath
+        ];
+
+        await runFfmpeg(ffmpegArgs);
+
+        if (!fs.existsSync(outputPath)) {
+            return res.status(500).json({ error: 'Failed to trim audio' });
+        }
+
+        res.json({ success: true, file: 'trimmed.wav' });
+
+    } catch (error) {
+        res.status(500).json({ error: 'Trim failed: ' + error.message });
+    }
+});
+
+// ===== CONVERT FORMAT =====
+app.post('/api/convert/:jobId', validateJobId, validateJobDir, async (req, res) => {
+    try {
+        const { jobId } = req.params;
+        const { format = 'mp3', bitrate = '192k' } = req.body;
+        const jobDir = req.jobDir;
+
+        const files = fs.readdirSync(jobDir);
+        const inputFile = files.find(f => /\.(wav|mp3|m4a|ogg|flac)$/i.test(f));
+        if (!inputFile) return res.status(404).json({ error: 'Audio file not found' });
+
+        const inputPath = path.join(jobDir, inputFile);
+        const outputFile = `converted.${format}`;
+        const outputPath = path.join(jobDir, outputFile);
+
+        const ffmpegArgs = ['-i', inputPath];
+
+        if (format === 'mp3') {
+            ffmpegArgs.push('-ab', bitrate, '-map', '0:a', '-y', outputPath);
+        } else if (format === 'ogg') {
+            ffmpegArgs.push('-codec:a', 'libvorbis', '-qscale:a', '6', '-y', outputPath);
+        } else if (format === 'flac') {
+            ffmpegArgs.push('-codec:a', 'flac', '-y', outputPath);
+        } else if (format === 'aac') {
+            ffmpegArgs.push('-codec:a', 'aac', '-ab', bitrate, '-y', outputPath);
+        } else if (format === 'wav') {
+            ffmpegArgs.push('-codec:a', 'pcm_s16le', '-y', outputPath);
+        } else {
+            return res.status(400).json({ error: 'Unsupported format: ' + format });
+        }
+
+        await runFfmpeg(ffmpegArgs);
+
+        if (!fs.existsSync(outputPath)) {
+            return res.status(500).json({ error: 'Failed to convert audio' });
+        }
+
+        res.json({ success: true, file: outputFile });
+
+    } catch (error) {
+        res.status(500).json({ error: 'Convert failed: ' + error.message });
+    }
+});
+
+// ===== ЭКСПОРТ В MIDI =====
+app.get('/api/export-midi/:jobId', validateJobId, validateJobDir, async (req, res) => {
+    try {
+        const { jobId } = req.params;
+        const jobDir = req.jobDir;
+        
+        // Find transcription file
+        const files = fs.readdirSync(jobDir);
+        let transcriptionFile = files.find(f => f.includes('transcription') && f.endsWith('.json'));
+        
+        if (!transcriptionFile) {
+            // Run transcription if not exists
+            const audioFile = files.find(f => /\.(mp3|wav|m4a|ogg|flac)$/i.test(f));
+            if (!audioFile) return res.status(404).json({ error: 'Audio file not found' });
+            
+            const transcribeScript = path.join(__dirname, 'transcribe.py');
+            await runPythonScript(transcribeScript, [path.join(jobDir, audioFile), jobDir]);
+            transcriptionFile = 'transcription.json';
+        }
+        
+        const transcriptionPath = path.join(jobDir, transcriptionFile);
+        if (!fs.existsSync(transcriptionPath)) {
+            return res.status(404).json({ error: 'Transcription not found' });
+        }
+        
+        const midiPath = path.join(jobDir, 'transcription.mid');
+        const generateScript = path.join(__dirname, 'generate_midi.py');
+        
+        await runPythonScript(generateScript, [transcriptionPath, midiPath]);
+        
+        if (!fs.existsSync(midiPath)) {
+            return res.status(500).json({ error: 'Failed to generate MIDI' });
+        }
+        
+        res.download(midiPath, `transcription_${jobId}.mid`);
+        
+    } catch (error) {
+        console.error('MIDI export error:', error);
+        res.status(500).json({ error: 'MIDI export failed: ' + error.message });
+    }
+});
+
+// ===== BATCH PARALLEL PROCESSING (Process multiple files concurrently) =====
+app.post('/api/batch-separate', async (req, res) => {
+    const { jobIds, preset = 'default', model = 'modern_ensemble', mode = '2stem' } = req.body;
+    
+    if (!Array.isArray(jobIds) || jobIds.length === 0) {
+        return res.status(400).json({ error: 'jobIds array is required' });
+    }
+
+    try {
+        // Process all jobs in parallel using Promise.all
+        const results = await Promise.all(
+            jobIds.map(async (jobId) => {
+                const cleanId = sanitizeId(jobId);
+                if (!cleanId) return { jobId, error: 'Invalid jobId' };
+                
+                const jobDir = safePath(UPLOAD_DIR, cleanId);
+                if (!jobDir || !fs.existsSync(jobDir)) {
+                    return { jobId, error: 'Job not found' };
+                }
+
+                try {
+                    const files = fs.readdirSync(jobDir);
+                    const inputFile = files.find(f => /\.(mp3|wav|m4a|ogg|flac|mp4|webm|opus|aac)$/i.test(f));
+                    if (!inputFile) return { jobId, error: 'Audio file not found' };
+
+                    const inputPath = path.join(jobDir, inputFile);
+                    const wavPath = path.join(jobDir, 'input.wav');
+                    const vocalsPath = path.join(jobDir, 'vocals.wav');
+                    const instrumentalPath = path.join(jobDir, 'instrumental.wav');
+
+                    // Convert to WAV
+                    await runFfmpeg(['-i', inputPath, '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2', '-y', wavPath]);
+
+                    // Run separation
+                    const args = [
+                        wavPath, jobDir,
+                        '--preset', preset,
+                        '--strength', '1.0',
+                        '--model', model,
+                        '--type', mode === '2stem' ? '4stem' : mode,
+                        '--mode', 'all',
+                        '--vocal-strength', '1.0'
+                    ];
+                    await runPythonScript(STEMS_SCRIPT, args);
+
+                    return { 
+                        jobId, 
+                        success: true, 
+                        vocals: `/outputs/${jobId}/vocals.wav`,
+                        instrumental: `/outputs/${jobId}/instrumental.wav`
+                    };
+                } catch (error) {
+                    return { jobId, error: error.message };
+                }
+            })
+        );
+
+        res.json({ success: true, results });
+    } catch (error) {
+        console.error('[Batch Separation Error]', error);
+        res.status(500).json({ error: 'Batch processing failed', details: error.message });
+    }
+});
+
+// ===== METADATA EDITING =====
+app.post('/api/metadata/:jobId/:stem', validateJobId, validateJobDir, (req, res) => {
+    try {
+        const jobId = req.params.jobId;
+        const stem = req.params.stem;
+        const { title, artist, album, year, track, genre } = req.body;
+        const jobDir = getJobDir(jobId);
+        const files = fs.readdirSync(jobDir);
+        const stemFile = files.find(f => f.startsWith(stem) && (f.endsWith('.mp3') || f.endsWith('.wav')));
+        if (!stemFile) {
+            return res.status(404).json({ error: 'Stem file not found' });
+        }
+        const filePath = path.join(jobDir, stemFile);
+        
+        // Read existing tags or create new
+        const tags = ID3.read(filePath) || {};
+        if (title) tags.title = title;
+        if (artist) tags.artist = artist;
+        if (album) tags.album = album;
+        if (year) tags.year = year;
+        if (track) tags.trackNumber = track;
+        if (genre) tags.genre = genre;
+        
+        const success = ID3.write(tags, filePath);
+        if (success) {
+            res.json({ success: true, message: 'Metadata updated' });
+        } else {
+            res.status(500).json({ error: 'Failed to write metadata' });
+        }
+    } catch (error) {
+        console.error('[Metadata Error]', error);
+        res.status(500).json({ error: 'Metadata update failed', details: error.message });
+    }
+});
+
+// ===== ONE-CLICK RADIO READY =====
+app.post('/api/radio-ready/:jobId', validateJobId, validateJobDir, async (req, res) => {
+  try {
+    const jobId = req.params.jobId;
+    const { platform = 'spotify' } = req.body;
+    const jobDir = getJobDir(jobId);
+    
+    // Find input file (use first audio file in job dir)
+    const files = fs.readdirSync(jobDir);
+    const inputFile = files.find(f => /\.(wav|mp3|m4a|ogg|flac)$/i.test(f));
+    if (!inputFile) {
+      return res.status(404).json({ error: 'No audio file found in job directory' });
+    }
+    
+    const inputPath = path.join(jobDir, inputFile);
+    const outputDir = path.join(jobDir, 'radio-ready');
+    fs.mkdirSync(outputDir, { recursive: true });
+    
+    emitProgress(jobId, 'progress', { step: 'radio-ready', percent: 10, message: 'Starting One-Click Radio Ready...' });
+    
+    // Run radio-ready.js
+    const RADIO_READY_SCRIPT = path.join(__dirname, 'radio-ready.js');
+    const args = [jobId, inputPath, outputDir, platform];
+    
+    emitProgress(jobId, 'progress', { step: 'separation', percent: 20, message: 'Separation (4-stem)...' });
+    await runScript(RADIO_READY_SCRIPT, args);
+    
+    emitProgress(jobId, 'progress', { step: 'mastering', percent: 80, message: 'Mastering for ' + platform + '...' });
+    
+    // Read metadata
+    const metadataPath = path.join(outputDir, 'radio_ready_info.json');
+    let metadata = {};
+    if (fs.existsSync(metadataPath)) {
+      metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+    }
+    
+    emitProgress(jobId, 'progress', { step: 'export', percent: 100, message: 'Export complete!' });
+    
+    // List output files
+    const outputFiles = fs.readdirSync(outputDir).filter(f => /\.wav$/.test(f));
+    
+    res.json({
+      success: true,
+      jobId,
+      platform,
+      outputDir: `outputs/${jobId}/radio-ready`,
+      files: outputFiles,
+      metadata
+    });
+    
+  } catch (error) {
+    console.error('[Radio Ready Error]', error);
+    res.status(500).json({ error: 'Radio ready failed', details: error.message });
   }
 });
 
